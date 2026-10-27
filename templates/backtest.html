@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}回测与准确率 · 预测分析平台{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>回测与准确率</h1>
+  <p class="meta">
+    对账口径：预测时点价格 vs 当前价格的实际涨跌。
+    <strong>看涨</strong>命中 = 实际上涨；<strong>看跌</strong>命中 = 实际下跌；<strong>震荡</strong>命中 = |涨跌| &lt; 3%。
+    每次运行自动对往期未验证预测回填。
+  </p>
+  <div class="kpi-row">
+    <div class="kpi"><div class="k">已对账样本</div><div class="v">{{ summary.total.n }}</div></div>
+    <div class="kpi"><div class="k">命中数</div><div class="v">{{ summary.total.hit }}</div></div>
+    <div class="kpi"><div class="k">总命中率</div>
+      <div class="v">{{ (summary.total.rate ~ '%') if summary.total.rate is not none else '—' }}</div></div>
+    <div class="kpi"><div class="k">平均实际涨跌</div>
+      <div class="v">{{ (summary.total.avg_pct ~ '%') if summary.total.avg_pct is not none else '—' }}</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>按方向统计</h2>
+  <table>
+    <tr><th>方向</th><th class="num">样本</th><th class="num">命中</th><th class="num">命中率</th><th class="num">平均实际涨跌</th></tr>
+    {% for d, v in summary.by_direction.items() %}
+    <tr>
+      <td><span class="badge {{ 'bull' if d=='看涨' else 'bear' if d=='看跌' else 'flat' }}">{{ d }}</span></td>
+      <td class="num">{{ v.n }}</td>
+      <td class="num">{{ v.hit }}</td>
+      <td class="num">{{ (v.rate ~ '%') if v.rate is not none else '—' }}</td>
+      <td class="num">{{ (v.avg_pct ~ '%') if v.avg_pct is not none else '—' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h2>按置信度统计</h2>
+  <table>
+    <tr><th>置信度</th><th class="num">样本</th><th class="num">命中</th><th class="num">命中率</th><th class="num">平均实际涨跌</th></tr>
+    {% for c, v in summary.by_confidence.items() %}
+    <tr>
+      <td><span class="conf conf-{{ c }}">置信度{{ c }}</span></td>
+      <td class="num">{{ v.n }}</td>
+      <td class="num">{{ v.hit }}</td>
+      <td class="num">{{ (v.rate ~ '%') if v.rate is not none else '—' }}</td>
+      <td class="num">{{ (v.avg_pct ~ '%') if v.avg_pct is not none else '—' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h2>按市场统计</h2>
+  <table>
+    <tr><th>市场</th><th class="num">样本</th><th class="num">命中</th><th class="num">命中率</th><th class="num">平均实际涨跌</th></tr>
+    {% for m, v in summary.by_market.items() %}
+    <tr>
+      <td>{{ m }}</td>
+      <td class="num">{{ v.n }}</td>
+      <td class="num">{{ v.hit }}</td>
+      <td class="num">{{ (v.rate ~ '%') if v.rate is not none else '—' }}</td>
+      <td class="num">{{ (v.avg_pct ~ '%') if v.avg_pct is not none else '—' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <div class="callout">
+    <strong>数据缺口与口径说明：</strong>对账窗口为「预测时点 → 当前」，跨度随运行频率变化（周末运行则为 2-7 天）；
+    置信度为"高"的样本需要足够期数才有统计意义；港股基本面层缺失会拉低整体置信度分布。
+  </div>
+</div>
+{% endblock %}

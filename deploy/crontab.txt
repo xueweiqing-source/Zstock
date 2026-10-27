@@ -1,0 +1,3 @@
+# 每日 22:00 执行（服务器时区 Asia/Shanghai），预测次一交易日
+# 分 时 日 月 周
+0 22 * * * TZ=Asia/Shanghai /var/www/stock-forecast/venv/bin/python /var/www/stock-forecast/run_pipeline.py >> /var/log/stock-forecast-cron.log 2>&1

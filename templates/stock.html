@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}{{ name or code }} · 个股工作台{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ name or '—' }} <span class="meta">{{ code }}.{{ market }}</span></h1>
+  <div class="badge-row">
+    {% if latest %}
+    <span class="tag">最近预测：{{ latest.direction }}</span>
+    <span class="conf conf-{{ latest.confidence }}">置信度{{ latest.confidence }}</span>
+    <span class="tag">综合分 {{ latest.composite_score }}</span>
+    {% endif %}
+    {% if latest and latest.price_at_pred %}
+    <span class="tag">预测时价 {{ latest.price_at_pred }}</span>
+    {% endif %}
+    {% if latest and latest.result_pct is not none %}
+    <span class="tag {{ 'up' if latest.result_pct > 0 else 'down' }}">实际 {{ '%+.2f'|format(latest.result_pct) }}%</span>
+    <span class="tag">{{ '命中' if latest.hit == 1 else '未命中' if latest.hit == 0 else '待验证' }}</span>
+    {% endif %}
+  </div>
+</div>
+
+{% if latest %}
+<div class="card">
+  <h2>三层评分卡（{{ latest.run_id }}）</h2>
+  <div class="layer-score">
+    <div class="layer-box">
+      <div class="lv">基本面 · 值不值得买</div>
+      <div class="sv">{{ latest.fund_score if latest.fund_score is not none else '—' }}</div>
+      <div class="meta">{{ latest.fund_verdict or '数据不足' }}</div>
+    </div>
+    <div class="layer-box">
+      <div class="lv">估值 · 贵不贵</div>
+      <div class="sv">{{ latest.val_score if latest.val_score is not none else '—' }}</div>
+      <div class="meta">{{ latest.val_verdict or '数据不足' }}</div>
+    </div>
+    <div class="layer-box">
+      <div class="lv">技术面 · 相对时机</div>
+      <div class="sv">{{ latest.tech_score if latest.tech_score is not none else '—' }}</div>
+      <div class="meta">{{ latest.tech_verdict or '数据不足' }}</div>
+    </div>
+    <div class="layer-box">
+      <div class="lv">交叉验证</div>
+      <div class="sv">
+        <span class="badge {{ 'bull' if latest.direction=='看涨' else 'bear' if latest.direction=='看跌' else 'flat' }}">{{ latest.direction }}</span>
+      </div>
+      <div class="meta">置信度 {{ latest.confidence }}</div>
+    </div>
+  </div>
+  <p class="meta">依据摘要：{{ latest.brief or '—' }}</p>
+  {% if latest.price is not none %}
+  <table>
+    <tr><th>现价</th><th class="num">涨跌%</th><th class="num">PE(TTM)</th><th class="num">PB</th>
+        <th class="num">MA20</th><th class="num">MA60</th><th class="num">RSI14</th>
+        <th class="num">MACD柱</th><th class="num">52周位置</th></tr>
+    <tr>
+      <td class="num">{{ latest.price }}</td>
+      <td class="num {{ 'up' if latest.change_pct and latest.change_pct > 0 else 'down' }}">{{ '%+.2f'|format(latest.change_pct) if latest.change_pct is not none else '—' }}%</td>
+      <td class="num">{{ latest.pe_ttm if latest.pe_ttm is not none else '—' }}</td>
+      <td class="num">{{ latest.pb if latest.pb is not none else '—' }}</td>
+      <td class="num">{{ '%.2f'|format(latest.ma20) if latest.ma20 is not none else '—' }}</td>
+      <td class="num">{{ '%.2f'|format(latest.ma60) if latest.ma60 is not none else '—' }}</td>
+      <td class="num">{{ '%.1f'|format(latest.rsi14) if latest.rsi14 is not none else '—' }}</td>
+      <td class="num">{{ latest.macd_hist if latest.macd_hist is not none else '—' }}</td>
+      <td class="num">{{ '%.0f'|format(latest.pos_52w) if latest.pos_52w is not none else '—' }}%</td>
+    </tr>
+  </table>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>历史预测与对账</h2>
+  {% if not history %}
+  <p class="meta">暂无历史预测记录。</p>
+  {% else %}
+  <table>
+    <tr>
+      <th>期号</th><th>生成时间</th><th>大盘</th><th>方向</th><th>置信度</th>
+      <th class="num">综合分</th><th class="num">预测价</th><th class="num">实际涨跌</th><th>命中</th>
+    </tr>
+    {% for h in history %}
+    <tr>
+      <td><a href="{{ prefix }}/report/{{ h.run_id }}">{{ h.run_id }}</a></td>
+      <td class="meta">{{ h.generated_at }}</td>
+      <td>{{ h.market_trend or '—' }}</td>
+      <td><span class="badge {{ 'bull' if h.direction=='看涨' else 'bear' if h.direction=='看跌' else 'flat' }}">{{ h.direction }}</span></td>
+      <td><span class="conf conf-{{ h.confidence }}">{{ h.confidence }}</span></td>
+      <td class="num">{{ h.composite_score }}</td>
+      <td class="num">{{ h.price_at_pred }}</td>
+      <td class="num {{ 'up' if h.result_pct and h.result_pct > 0 else 'down' }}">{{ ('%+.2f'|format(h.result_pct) ~ '%') if h.result_pct is not none else '待验证' }}</td>
+      <td>{{ '✓ 命中' if h.hit == 1 else '✗ 未中' if h.hit == 0 else '—' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+
+{% if pool %}
+<div class="card">
+  <h2>热榜来源（{{ latest.run_id if latest else '' }}）</h2>
+  <p class="meta">
+    抓取时间：{{ pool.fetched_at or '—' }} ·
+    来源：{{ (pool.sources_detail | from_json | join('、')) if pool.sources_detail else '—' }}
+  </p>
+  {% if pool.tags and pool.tags != '[]' %}
+  <p>{% for t in (pool.tags | from_json) %}<span class="tag">{{ t }}</span>{% endfor %}</p>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="disclaimer">
+    <strong>免责声明</strong><br>
+    以上内容基于公开数据和量化分析，仅供参考，不构成投资建议。市场有风险，投资需谨慎。
+    任何投资决策应结合个人风险承受能力、资金状况和投资目标独立判断，必要时咨询持牌专业机构。过往表现不预示未来收益。
+  </div>
+</div>
+{% endblock %}

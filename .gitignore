@@ -1,0 +1,18 @@
+# 运行时数据与产物
+data/
+*.db
+*.log
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.Python
+.pytest_cache/
+
+# 系统 / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}报告中心 · 预测分析平台{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>报告中心</h1>
+  <p class="meta">每周六、周日 22:00 自动生成。点击任一行查看完整报告。</p>
+  {% if not runs %}
+  <div class="callout">暂无历史报告。手动执行 <code>python run_pipeline.py</code> 生成首期。</div>
+  {% else %}
+  <table>
+    <tr>
+      <th>期号</th><th>生成时间</th><th>执行日</th><th>消息窗口</th>
+      <th>大盘判断</th><th class="num">综合分</th><th class="num">样本股</th>
+      <th>研判引擎</th><th>报告</th>
+    </tr>
+    {% for r in runs %}
+    <tr>
+      <td>{{ r.run_id }}</td>
+      <td class="meta">{{ r.generated_at }}</td>
+      <td>{{ r.weekday or '—' }}</td>
+      <td class="meta" style="max-width:220px">{{ r.news_window or '—' }}</td>
+      <td>
+        <span class="badge {{ 'bull' if r.market_trend=='偏多' else 'bear' if r.market_trend=='偏空' else 'flat' }}">{{ r.market_trend or '—' }}</span>
+      </td>
+      <td class="num">{{ '%.1f'|format(r.market_score) if r.market_score is not none else '—' }}</td>
+      <td class="num">{{ r.stock_count or '—' }}</td>
+      <td class="meta">{{ r.notes and '—' or '—' }}</td>
+      <td><a href="{{ prefix }}/report/{{ r.run_id }}">查看 →</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>个股快速入口</h2>
+  <p class="meta">在报告页点击股票代码可进入个股工作台；也可用 <code>/stock/SH/600519</code> 形式直接访问。</p>
+</div>
+{% endblock %}

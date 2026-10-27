@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}总览 · 预测分析平台{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>平台总览</h1>
+  <p class="meta">每日 22:00 自动运行，预测次一交易日 · 研判引擎：{{ engine_label }}</p>
+  {% if latest %}
+  <div class="kpi-row">
+    <div class="kpi"><div class="k">最新期号</div><div class="v" style="font-size:16px">{{ latest.run_id }}</div></div>
+    <div class="kpi"><div class="k">大盘判断</div>
+      <div class="v" style="color:{{ '#c0392b' if latest.market_trend=='偏多' else '#1e8449' if latest.market_trend=='偏空' else '#5d6d7e' }}">{{ latest.market_trend or '—' }}</div></div>
+    <div class="kpi"><div class="k">综合分</div><div class="v">{{ '%.1f'|format(latest.market_score) if latest.market_score is not none else '—' }}</div></div>
+    <div class="kpi"><div class="k">样本股</div><div class="v">{{ latest.stock_count or '—' }}</div></div>
+    <div class="kpi"><div class="k">消息样本</div><div class="v">{{ latest.news_count or '—' }}</div></div>
+    <div class="kpi"><div class="k">生成时间</div><div class="v" style="font-size:14px">{{ latest.generated_at or '—' }}</div></div>
+  </div>
+  {% else %}
+  <div class="callout">暂无运行记录。手动执行 <code>python run_pipeline.py</code> 生成首期。</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>最新一期预测分布</h2>
+  {% if dist %}
+  <div class="kpi-row">
+    <div class="kpi"><div class="k">看涨</div><div class="v" style="color:#c0392b">{{ dist.看涨 or 0 }}</div></div>
+    <div class="kpi"><div class="k">震荡</div><div class="v" style="color:#5d6d7e">{{ dist.震荡 or 0 }}</div></div>
+    <div class="kpi"><div class="k">看跌</div><div class="v" style="color:#1e8449">{{ dist.看跌 or 0 }}</div></div>
+    <div class="kpi"><div class="k">高置信度</div><div class="v">{{ conf_dist.高 or 0 }}</div></div>
+    <div class="kpi"><div class="k">中置信度</div><div class="v">{{ conf_dist.中 or 0 }}</div></div>
+    <div class="kpi"><div class="k">低置信度</div><div class="v">{{ conf_dist.低 or 0 }}</div></div>
+  </div>
+  {% else %}
+  <p class="meta">暂无预测数据。</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>回测速览</h2>
+  <div class="kpi-row">
+    <div class="kpi"><div class="k">已对账样本</div><div class="v">{{ bt.total.n }}</div></div>
+    <div class="kpi"><div class="k">命中</div><div class="v">{{ bt.total.hit }}</div></div>
+    <div class="kpi"><div class="k">总命中率</div>
+      <div class="v">{{ (bt.total.rate ~ '%') if bt.total.rate is not none else '—' }}</div></div>
+  </div>
+  <p class="meta"><a href="{{ prefix }}/backtest">查看完整回测与准确率 →</a></p>
+</div>
+
+<div class="card">
+  <h2>最近运行</h2>
+  {% if runs %}
+  <table>
+    <tr><th>期号</th><th>生成时间</th><th>大盘</th><th class="num">样本</th><th>消息窗口</th><th>报告</th></tr>
+    {% for r in runs %}
+    <tr>
+      <td>{{ r.run_id }}</td>
+      <td class="meta">{{ r.generated_at }}</td>
+      <td><span class="badge {{ 'bull' if r.market_trend=='偏多' else 'bear' if r.market_trend=='偏空' else 'flat' }}">{{ r.market_trend or '—' }}</span></td>
+      <td class="num">{{ r.stock_count or '—' }}</td>
+      <td class="meta" style="max-width:220px">{{ r.news_window or '—' }}</td>
+      <td><a href="{{ prefix }}/report/{{ r.run_id }}">查看 →</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="meta">暂无历史运行。</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>系统状态</h2>
+  <table>
+    <tr><th>项</th><th>状态</th></tr>
+    <tr><td>研判引擎</td><td>{{ engine_label }}</td></tr>
+    <tr><td>LLM 配置</td><td>{{ llm_state }}</td></tr>
+    <tr><td>数据来源</td><td class="meta">东方财富 / 同花顺 / 腾讯财经 / 东财7x24</td></tr>
+    <tr><td>定时任务</td><td class="meta">每日 22:00（Asia/Shanghai）</td></tr>
+    <tr><td>规则配置</td><td><a href="{{ prefix }}/settings">规则与研判配置 →</a></td></tr>
+  </table>
+</div>
+{% endblock %}

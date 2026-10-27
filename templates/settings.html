@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}规则与研判 · 预测分析平台{% endblock %}
+{% block content %}
+{% if saved %}<div class="callout" style="background:#eafaf1;border-left-color:#1e8449">配置已保存，下次运行生效（历史报告不变）。</div>{% endif %}
+{% if reset_done %}<div class="callout">已恢复默认规则。</div>{% endif %}
+{% if test_msg %}<div class="callout {{ 'risk' if test_ok is sameas false else '' }}">{{ test_msg }}</div>{% endif %}
+
+<form method="post" action="{{ prefix }}/settings">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+<div class="card">
+  <h2>三层权重与方向阈值</h2>
+  <p class="meta">三层加权综合分 = 基本面×W1 + 估值×W2 + 技术面×W3（有效层归一化）。综合分 ≥ 看涨阈值 → 看涨；&lt; 看跌阈值 → 看跌；中间为震荡。</p>
+  <table>
+    <tr><th>参数</th><th>当前值</th><th>说明</th></tr>
+    <tr><td>基本面权重 W1</td><td><input name="w_fund" value="{{ rules.w_fund }}" style="width:100px"></td><td class="meta">默认 0.35</td></tr>
+    <tr><td>估值权重 W2</td><td><input name="w_val" value="{{ rules.w_val }}" style="width:100px"></td><td class="meta">默认 0.30</td></tr>
+    <tr><td>技术面权重 W3</td><td><input name="w_tech" value="{{ rules.w_tech }}" style="width:100px"></td><td class="meta">默认 0.35</td></tr>
+    <tr><td>看涨阈值</td><td><input name="dir_bull" value="{{ rules.dir_bull }}" style="width:100px"></td><td class="meta">综合分 ≥ 此值 → 看涨，默认 62</td></tr>
+    <tr><td>看跌阈值</td><td><input name="dir_bear" value="{{ rules.dir_bear }}" style="width:100px"></td><td class="meta">综合分 &lt; 此值 → 看跌，默认 45</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2>基本面规则（值不值得买）</h2>
+  <table>
+    <tr><th>参数</th><th>当前值</th><th>说明</th></tr>
+    <tr><td>营收同比分档</td>
+        <td><input name="fund_revenue_bands" value="{{ rules.fund_revenue_bands }}" style="width:260px"></td>
+        <td class="meta">JSON：[[阈值,加分],...] 从高到低，默认 [[20,22],[5,14],[0,6],[-10,-6]]</td></tr>
+    <tr><td>净利同比分档</td>
+        <td><input name="fund_profit_bands" value="{{ rules.fund_profit_bands }}" style="width:260px"></td>
+        <td class="meta">默认 [[30,22],[10,14],[0,6],[-1000,-10]]</td></tr>
+    <tr><td>ROE 分档</td>
+        <td><input name="fund_roe_bands" value="{{ rules.fund_roe_bands }}" style="width:260px"></td>
+        <td class="meta">默认 [[15,22],[8,14],[0,6],[-1000,-10]]</td></tr>
+    <tr><td>负债率低杠杆线</td><td><input name="fund_debt_ok" value="{{ rules.fund_debt_ok }}" style="width:100px">%</td><td class="meta">低于此值 +12，默认 50</td></tr>
+    <tr><td>负债率中等线</td><td><input name="fund_debt_mid" value="{{ rules.fund_debt_mid }}" style="width:100px">%</td><td class="meta">低于此值 +4，高于 -8，默认 70</td></tr>
+    <tr><td>现金流健康线</td><td><input name="fund_cf_pos" value="{{ rules.fund_cf_pos }}" style="width:100px"></td><td class="meta">经营现金流/营收 高于此值 +10，默认 0.05</td></tr>
+    <tr><td>好公司阈值</td><td><input name="fund_verdict_good" value="{{ rules.fund_verdict_good }}" style="width:100px"></td><td class="meta">默认 68</td></tr>
+    <tr><td>一般/偏弱分界</td><td><input name="fund_verdict_mid" value="{{ rules.fund_verdict_mid }}" style="width:100px"></td><td class="meta">默认 42</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2>估值规则（贵不贵）</h2>
+  <table>
+    <tr><th>参数</th><th>当前值</th><th>说明</th></tr>
+    <tr><td>PE 低估线</td><td><input name="val_pe_cheap" value="{{ rules.val_pe_cheap }}" style="width:100px"></td><td class="meta">PE &lt; 此值为低估，默认 15</td></tr>
+    <tr><td>PE 合理上限</td><td><input name="val_pe_fair" value="{{ rules.val_pe_fair }}" style="width:100px"></td><td class="meta">默认 30</td></tr>
+    <tr><td>PE 偏贵上限</td><td><input name="val_pe_expensive" value="{{ rules.val_pe_expensive }}" style="width:100px"></td><td class="meta">默认 60</td></tr>
+    <tr><td>PB 破净线</td><td><input name="val_pb_cheap" value="{{ rules.val_pb_cheap }}" style="width:100px"></td><td class="meta">默认 1.2</td></tr>
+    <tr><td>PB 合理上限</td><td><input name="val_pb_fair" value="{{ rules.val_pb_fair }}" style="width:100px"></td><td class="meta">默认 3</td></tr>
+    <tr><td>52周位置低位线</td><td><input name="val_pos_low" value="{{ rules.val_pos_low }}" style="width:100px">%</td><td class="meta">低于此值 +22，默认 30</td></tr>
+    <tr><td>52周位置高位线</td><td><input name="val_pos_high" value="{{ rules.val_pos_high }}" style="width:100px">%</td><td class="meta">默认 70</td></tr>
+    <tr><td>PEG 合理线</td><td><input name="val_peg_good" value="{{ rules.val_peg_good }}" style="width:100px"></td><td class="meta">默认 1</td></tr>
+    <tr><td>PEG 偏贵线</td><td><input name="val_peg_fair" value="{{ rules.val_peg_fair }}" style="width:100px"></td><td class="meta">默认 2</td></tr>
+    <tr><td>便宜阈值</td><td><input name="val_verdict_cheap" value="{{ rules.val_verdict_cheap }}" style="width:100px"></td><td class="meta">默认 62</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2>技术面规则（相对时机）</h2>
+  <table>
+    <tr><th>参数</th><th>当前值</th><th>说明</th></tr>
+    <tr><td>MA20 权重</td><td><input name="tech_ma20_w" value="{{ rules.tech_ma20_w }}" style="width:100px"></td><td class="meta">默认 14</td></tr>
+    <tr><td>MA60 权重</td><td><input name="tech_ma60_w" value="{{ rules.tech_ma60_w }}" style="width:100px"></td><td class="meta">默认 13</td></tr>
+    <tr><td>MA120 权重</td><td><input name="tech_ma120_w" value="{{ rules.tech_ma120_w }}" style="width:100px"></td><td class="meta">默认 9</td></tr>
+    <tr><td>MACD 权重</td><td><input name="tech_macd_w" value="{{ rules.tech_macd_w }}" style="width:100px"></td><td class="meta">默认 10</td></tr>
+    <tr><td>RSI 超买线</td><td><input name="tech_rsi_overbought" value="{{ rules.tech_rsi_overbought }}" style="width:100px"></td><td class="meta">默认 70</td></tr>
+    <tr><td>RSI 超卖线</td><td><input name="tech_rsi_oversold" value="{{ rules.tech_rsi_oversold }}" style="width:100px"></td><td class="meta">默认 30</td></tr>
+    <tr><td>放量确认比</td><td><input name="tech_vol_confirm" value="{{ rules.tech_vol_confirm }}" style="width:100px"></td><td class="meta">5日均量/20日均量 默认 1.2</td></tr>
+    <tr><td>偏多阈值</td><td><input name="tech_verdict_bull" value="{{ rules.tech_verdict_bull }}" style="width:100px"></td><td class="meta">默认 62</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2>大盘与回测</h2>
+  <table>
+    <tr><th>参数</th><th>当前值</th><th>说明</th></tr>
+    <tr><td>广度健康线</td><td><input name="breadth_healthy" value="{{ rules.breadth_healthy }}" style="width:100px">%</td><td class="meta">上涨占比 ≥ 此值加分，默认 55</td></tr>
+    <tr><td>广度弱势线</td><td><input name="breadth_weak" value="{{ rules.breadth_weak }}" style="width:100px">%</td><td class="meta">≤ 此值减分，默认 42</td></tr>
+    <tr><td>广度偏软线</td><td><input name="breadth_soft" value="{{ rules.breadth_soft }}" style="width:100px">%</td><td class="meta">默认 48</td></tr>
+    <tr><td>回测震荡阈值</td><td><input name="backtest_flat_pct" value="{{ rules.backtest_flat_pct }}" style="width:100px">%</td><td class="meta">|实际涨跌| &lt; 此值算「震荡」命中，默认 1.0（每日口径）</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2>LLM 研判配置</h2>
+  <p class="meta">启用后，大盘叙事由 LLM 生成（与量化指标交叉验证）；未启用或调用失败时自动降级为规则叙事，系统不会中断。</p>
+  <table>
+    <tr><th>参数</th><th>当前值</th><th>说明</th></tr>
+    <tr><td>启用 LLM 研判</td>
+        <td><label><input type="checkbox" name="llm_enabled" value="1" {{ 'checked' if llm.enabled else '' }}> 开启</label></td>
+        <td class="meta">关闭时全部走确定性规则</td></tr>
+    <tr><td>API Base</td>
+        <td><input name="llm_api_base" value="{{ llm.api_base }}" style="width:320px" placeholder="https://api.deepseek.com/v1"></td>
+        <td class="meta">OpenAI 兼容接口地址</td></tr>
+    <tr><td>API Key</td>
+        <td><input name="llm_api_key" type="password" value="{{ llm.api_key }}" style="width:320px" placeholder="sk-...">
+        {% if llm.api_key %}<span class="meta">（已配置 {{ llm.api_key[:8] }}…，留空保持不变）</span>{% endif %}</td>
+        <td class="meta">仅存储在服务器 data/app_config.json</td></tr>
+    <tr><td>模型</td>
+        <td><input name="llm_model" value="{{ llm.model }}" style="width:200px"></td>
+        <td class="meta">deepseek-chat / mimo 等</td></tr>
+  </table>
+  <p style="margin-top:12px">
+    <button type="submit" name="action" value="save" style="padding:10px 22px;border:0;border-radius:6px;background:#1a5276;color:#fff;font-size:14px;cursor:pointer">保存全部配置</button>
+    &nbsp;
+    <button type="submit" name="action" value="test_llm" style="padding:10px 22px;border:1px solid #1a5276;border-radius:6px;background:#fff;color:#1a5276;font-size:14px;cursor:pointer">测试 LLM 连接</button>
+    &nbsp;
+    <button type="submit" name="action" value="reset_rules" style="padding:10px 22px;border:1px solid #c0392b;border-radius:6px;background:#fff;color:#c0392b;font-size:14px;cursor:pointer"
+            onclick="return confirm('确认恢复默认规则？LLM 配置不受影响。')">恢复默认规则</button>
+  </p>
+</div>
+</form>
+
+<div class="card">
+  <div class="disclaimer">
+    <strong>配置说明</strong><br>
+    修改只影响之后的运行，已生成的历史报告与回测记录不会改变。规则调整后建议观察 2-3 期命中率变化再决定是否回调。
+  </div>
+</div>
+{% endblock %}
