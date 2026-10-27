@@ -20,3 +20,6 @@ __pycache__/
 Thumbs.db
 .idea/
 .vscode/
+
+# 前端构建（node_modules 不入库，bundle.js 产物入库）
+build/node_modules/

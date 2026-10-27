@@ -1,10 +1,9 @@
-/* Zstock 管理平台前端（Vue 3 + Ant Design Vue 4，无构建）
- * 路由：hash 模式（#/dashboard, #/runs, #/report/xxx ...）
- */
-(function () {
-  const { createApp, ref, reactive, computed, onMounted, watch, h } = Vue;
+/* Zstock 前端入口（esbuild 打包：vue + ant-design-vue + 页面逻辑） */
+import { createApp, ref, reactive, computed, onMounted, watch, h } from 'vue';
+import Antd from 'ant-design-vue';
+import 'ant-design-vue/dist/reset.css';
 
-  // ---------- API 客户端 ----------
+// ---------- API 客户端 ----------
   const api = {
     async req(url, opts = {}) {
       const csrf = sessionStorage.getItem('csrf') || '';
@@ -675,7 +674,6 @@
     },
   };
 
-  const app = createApp(App);
-  if (window.antd) app.use(antd);
-  app.mount('#app');
-})();
+const app = createApp(App);
+app.use(Antd);
+app.mount('#app');
