@@ -1,7 +1,12 @@
 /* Zstock 前端入口（esbuild 打包：vue + ant-design-vue + 页面逻辑） */
 import { createApp, ref, reactive, computed, onMounted, watch, h } from 'vue';
+import * as Vue from 'vue';
 import Antd from 'ant-design-vue';
 import 'ant-design-vue/dist/reset.css';
+
+// API 基址：跟随页面挂载点（子路径部署如 /forecast/ 时自动适配）
+const API_BASE = new URL('./api/', document.baseURI).href;
+const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
 
 // ---------- API 客户端 ----------
   const api = {
@@ -62,7 +67,7 @@ import 'ant-design-vue/dist/reset.css';
       const doLogin = async () => {
         loading.value = true; error.value = '';
         try {
-          const r = await api.post('/api/login', { username: username.value, password: password.value });
+          const r = await api.post(apiUrl('login'), { username: username.value, password: password.value });
           sessionStorage.setItem('csrf', r.csrf_token);
           window.location.hash = '#/dashboard';
         } catch (e) { error.value = e.message; }
@@ -125,7 +130,7 @@ import 'ant-design-vue/dist/reset.css';
       const onMenu = ({ key }) => { window.location.hash = key; };
       const onUserMenu = async ({ key }) => {
         if (key === 'logout') {
-          await api.post('/api/logout'); sessionStorage.clear();
+          await api.post(apiUrl('logout')); sessionStorage.clear();
           window.location.hash = '#/login';
         }
       };
@@ -225,7 +230,7 @@ import 'ant-design-vue/dist/reset.css';
       ];
       onMounted(async () => {
         try {
-          data.value = await api.get('/api/dashboard');
+          data.value = await api.get(apiUrl('dashboard'));
           factors.value = (data.value.latest?.market_factors && typeof data.value.latest.market_factors === 'string')
             ? JSON.parse(data.value.latest.market_factors || '[]') : (data.value.latest?.market_factors || []);
         } catch (e) { console.error(e); }
@@ -267,7 +272,7 @@ import 'ant-design-vue/dist/reset.css';
         { title: '操作', key: 'action' },
       ];
       onMounted(async () => {
-        try { rows.value = (await api.get('/api/runs')).runs; } catch (e) { console.error(e); }
+        try { rows.value = (await api.get(apiUrl('runs'))).runs; } catch (e) { console.error(e); }
         loading.value = false;
       });
       return { rows, loading, cols, fmt, dirTag, go: (h) => window.location.hash = h };
@@ -339,7 +344,7 @@ import 'ant-design-vue/dist/reset.css';
     setup(props) {
       const run = ref({}); const stocks = ref([]);
       const factors = ref([]); const risks = ref([]);
-      const reportUrl = computed(() => run.value.run_id ? `/api/report/${run.value.run_id}/html` : '');
+      const reportUrl = computed(() => run.value.run_id ? apiUrl('report/' + run.value.run_id + '/html') : '');
       const stockCols = [
         { title: '代码', key: 'code' },
         { title: '名称', dataIndex: 'name', key: 'name', ellipsis: true },
@@ -354,7 +359,7 @@ import 'ant-design-vue/dist/reset.css';
       ];
       onMounted(async () => {
         try {
-          const r = await api.get('/api/report/' + props.params.id);
+          const r = await api.get(apiUrl('report/') + props.params.id);
           run.value = r.run; stocks.value = r.stocks;
           factors.value = r.market_factors || [];
           risks.value = r.market_risks || [];
@@ -433,7 +438,7 @@ import 'ant-design-vue/dist/reset.css';
       ];
       onMounted(async () => {
         try {
-          stock.value = await api.get(`/api/stock/${props.params.market}/${props.params.code}`);
+          stock.value = await api.get(apiUrl(`stock/${props.params.market}/${props.params.code}`));
           latest.value = stock.value.latest || {};
         } catch (e) { console.error(e); }
       });
@@ -486,7 +491,7 @@ import 'ant-design-vue/dist/reset.css';
       const confRows = computed(() => toRows(s.value.by_confidence));
       const mktRows = computed(() => toRows(s.value.by_market));
       onMounted(async () => {
-        try { s.value = await api.get('/api/backtest'); } catch (e) { console.error(e); }
+        try { s.value = await api.get(apiUrl('backtest')); } catch (e) { console.error(e); }
         loading.value = false;
       });
       return { s, loading, statCols, dirRows, confRows, mktRows, fmtPct };
@@ -598,7 +603,7 @@ import 'ant-design-vue/dist/reset.css';
       const msg = ref({ text: '', type: 'success' });
       onMounted(async () => {
         try {
-          const r = await api.get('/api/settings');
+          const r = await api.get(apiUrl('settings'));
           rules.value = r.rules; llm.value = r.llm;
         } catch (e) { console.error(e); }
         loading.value = false;
@@ -606,14 +611,14 @@ import 'ant-design-vue/dist/reset.css';
       const save = async () => {
         saving.value = true;
         try {
-          await api.post('/api/settings', { rules: rules.value, llm: llm.value });
+          await api.post(apiUrl('settings'), { rules: rules.value, llm: llm.value });
           msg.value = { text: '配置已保存，下次运行生效', type: 'success' };
         } catch (e) { msg.value = { text: e.message, type: 'error' }; }
         saving.value = false;
       };
       const reset = async () => {
         try {
-          const r = await api.post('/api/settings', { action: 'reset_rules' });
+          const r = await api.post(apiUrl('settings'), { action: 'reset_rules' });
           rules.value = r.rules;
           msg.value = { text: '已恢复默认规则', type: 'info' };
         } catch (e) { msg.value = { text: e.message, type: 'error' }; }
@@ -621,7 +626,7 @@ import 'ant-design-vue/dist/reset.css';
       const testLlm = async () => {
         testing.value = true;
         try {
-          const r = await api.post('/api/settings', {
+          const r = await api.post(apiUrl('settings'), {
             action: 'test_llm', llm_api_base: llm.value.api_base,
             llm_api_key: llm.value.api_key, llm_model: llm.value.model,
           });
@@ -664,7 +669,7 @@ import 'ant-design-vue/dist/reset.css';
         // 未登录直接跳登录页
         if (r.value.name !== 'login') {
           try {
-            const m = await api.get('/api/me');
+            const m = await api.get(apiUrl('me'));
             me.value = m; sessionStorage.setItem('user', m.username);
             sessionStorage.setItem('csrf', m.csrf_token);
           } catch (e) { /* api 已跳转 */ }

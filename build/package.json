@@ -3,9 +3,10 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "build": "esbuild src/main.js --bundle --minify --format=iife --outfile=../static/js/bundle.js --alias:vue=./node_modules/vue/dist/vue.esm-bundler.js --define:process.env.NODE_ENV=\"production\" --define:__VUE_OPTIONS_API__=true --define:__VUE_PROD_DEVTOOLS__=false"
+    "build": "node build.js"
   },
   "dependencies": {
+    "@vue/compiler-dom": "^3.5.13",
     "ant-design-vue": "^4.2.6",
     "esbuild": "^0.24.0",
     "jsdom": "^24.1.3",
