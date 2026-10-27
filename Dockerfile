@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY config.py scrapers.py indicators.py analysis.py llm.py \
      db.py report_gen.py webapp.py run_pipeline.py ./
 COPY templates/ ./templates/
+COPY static/ ./static/
 COPY deploy/ ./deploy/
 
 RUN mkdir -p /app/data/reports
