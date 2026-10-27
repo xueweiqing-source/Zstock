@@ -15,9 +15,43 @@ REPORTS_DIR = DATA_DIR / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---------- Web 鉴权 ----------
+# 口令/密钥一律走环境变量，代码不落任何真实凭据。
+# 生产用 /etc/stock-forecast.env（见 deploy/install.sh，权限 600）注入。
 ADMIN_USER = os.environ.get("SF_ADMIN_USER", "admin")
-ADMIN_PASSWORD = os.environ.get("SF_ADMIN_PASSWORD", "Xiaoqing@123")
-SECRET_KEY = os.environ.get("SF_SECRET_KEY", "sf-dev-secret-change-in-prod")
+ADMIN_PASSWORD = os.environ.get("SF_ADMIN_PASSWORD", "")
+SECRET_KEY = os.environ.get("SF_SECRET_KEY", "")
+
+
+def ensure_secret_key() -> str:
+    """SECRET_KEY 未设置时生成随机值并持久化到 data/secret_key.txt（已 gitignore）"""
+    global SECRET_KEY
+    if SECRET_KEY:
+        return SECRET_KEY
+    key_file = DATA_DIR / "secret_key.txt"
+    if key_file.exists():
+        SECRET_KEY = key_file.read_text(encoding="utf-8").strip()
+    if not SECRET_KEY:
+        import secrets as _secrets
+        SECRET_KEY = _secrets.token_hex(32)
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        key_file.write_text(SECRET_KEY, encoding="utf-8")
+        try:
+            key_file.chmod(0o600)
+        except OSError:
+            pass
+    return SECRET_KEY
+
+
+def validate_security() -> None:
+    """启动时校验安全配置，缺失则拒绝启动（避免用默认口令上线）"""
+    if not ADMIN_PASSWORD or ADMIN_PASSWORD in ("CHANGE_ME", "changeme", "password"):
+        raise SystemExit(
+            "[安全] 未设置 SF_ADMIN_PASSWORD 环境变量。\n"
+            "  生产：写入 /etc/stock-forecast.env（见 deploy/install.sh）\n"
+            "  本地：export SF_ADMIN_PASSWORD=你的口令\n"
+            "  代码不提供默认口令，拒绝以已知口令启动。"
+        )
+
 SESSION_LIFETIME_HOURS = 8
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_LOCK_SECONDS = 900

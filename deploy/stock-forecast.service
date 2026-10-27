@@ -6,15 +6,11 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/var/www/stock-forecast
-Environment=SF_SECRET_KEY=CHANGE_ME_ON_INSTALL
-Environment=SF_ADMIN_USER=admin
-Environment=SF_ADMIN_PASSWORD=Xiaoqing@123
+# 凭据从环境文件注入（install.sh 生成，权限 600，不入库）
+# 必填：SF_ADMIN_PASSWORD；可选：SF_SECRET_KEY、SF_ADMIN_USER、LLM_API_BASE、LLM_API_KEY、LLM_MODEL
+EnvironmentFile=-/etc/stock-forecast.env
 Environment=SF_URL_PREFIX=/forecast
 Environment=PYTHONUNBUFFERED=1
-# LLM 研判（不配置则降级为规则叙事）
-Environment=LLM_API_BASE=
-Environment=LLM_API_KEY=
-Environment=LLM_MODEL=deepseek-chat
 ExecStart=/var/www/stock-forecast/venv/bin/gunicorn \
     -b 127.0.0.1:8501 \
     -w 1 --threads 4 --timeout 60 \

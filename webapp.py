@@ -27,7 +27,8 @@ import config as C
 import db as D
 
 app = Flask(__name__)
-app.secret_key = C.SECRET_KEY
+C.validate_security()
+app.secret_key = C.ensure_secret_key()
 
 URL_PREFIX = os.environ.get("SF_URL_PREFIX", "/forecast").rstrip("/")
 
