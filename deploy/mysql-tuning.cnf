@@ -1,0 +1,29 @@
+# MySQL 低内存调优（主机 2G，需给 znote/emp/nginx 留空间）
+[mysqld]
+character-set-server   = utf8mb4
+collation-server       = utf8mb4_unicode_ci
+init_connect           = 'SET NAMES utf8mb4'
+
+# 内存控制（关键）
+innodb_buffer_pool_size = 128M
+innodb_log_buffer_size  = 16M
+key_buffer_size         = 8M
+max_connections         = 30
+table_open_cache        = 200
+tmp_table_size          = 16M
+max_heap_table_size     = 16M
+sort_buffer_size        = 256K
+read_buffer_size        = 256K
+net_buffer_length       = 8K
+
+# 关掉吃内存的可选组件
+performance_schema      = OFF
+skip-log-bin
+
+# 日志精简
+slow_query_log          = OFF
+expire_logs_days        = 3
+max_binlog_size         = 10M
+
+[client]
+default-character-set = utf8mb4

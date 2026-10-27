@@ -19,65 +19,80 @@
 
 ## 快速开始
 
+### Docker（推荐，生产同款）
+
 ```bash
-# 1. 安装
-python3.11 -m venv venv
-./venv/bin/pip install -r requirements.txt
+# 1. 生成凭据并启动（web + mysql）
+bash deploy/install-docker.sh
 
-# 2. 设置凭据（代码不含默认口令）
-export SF_ADMIN_PASSWORD=你的登录口令
+# 2. 手动跑一期
+docker compose exec web python run_pipeline.py
 
-# 3. 生成首期报告
-./venv/bin/python run_pipeline.py
-
-# 4. 启动 Web（本地调试设空前缀）
-SF_URL_PREFIX= ./venv/bin/python webapp.py
-# 打开 http://127.0.0.1:8501
+# 3. 打开 http://127.0.0.1:8501
 ```
 
-生产部署见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
+### 本地开发（SQLite 兜底）
+
+```bash
+python3.11 -m venv venv
+./venv/bin/pip install -r requirements.txt
+export SF_ADMIN_PASSWORD=你的登录口令
+./venv/bin/python run_pipeline.py
+SF_URL_PREFIX= ./venv/bin/python webapp.py
+```
+
+> 未设置 `DB_HOST` 时自动使用 SQLite（`data/forecast.db`），无需起 MySQL。
+> 生产部署见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
 ## 系统架构
 
 ```
-┌────────────────────────────────────────────────────────┐
-│  cron 每日 22:00（Asia/Shanghai）                       │
-│    run_pipeline.py                                     │
-│      ① 热股池   东财人气 + 同花顺热股 + 港股代理         │
-│      ② 行情     腾讯批量快照（价/PE/PB）                 │
-│      ③ 明细     K线(前复权250根) + 东财F10财务           │
-│      ④ 消息面   东财7x24 + 关键词情绪分                  │
-│      ⑤ 大盘     指数趋势+广度+情绪 → 规则/LLM 研判       │
-│      ⑥ 回测     往期预测 vs 当前价 → 命中率回填          │
-│      ⑦ 产出     HTML 报告 + SQLite 落库                 │
-└────────────────────────────────────────────────────────┘
-                         ↓
-┌────────────────────────────────────────────────────────┐
-│  Flask Web（gunicorn 127.0.0.1:8501）                   │
-│    /dashboard  总览        /runs       报告中心          │
-│    /stock/..   个股工作台   /backtest   回测与准确率      │
-│    /settings   规则与研判（43 项阈值 + LLM 开关）        │
-│    登录鉴权 · 会话管理 · CSRF · 限流 · 安全响应头        │
-└────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  cron 每日 22:00（Asia/Shanghai）                        │
+│    docker compose exec web python run_pipeline.py       │
+│      ① 热股池   东财人气 + 同花顺热股 + 港股代理          │
+│      ② 行情     腾讯批量快照（价/PE/PB）                  │
+│      ③ 明细     K线(前复权250根) + 东财F10财务            │
+│      ④ 消息面   东财7x24 + 关键词情绪分                   │
+│      ⑤ 大盘     指数趋势+广度+情绪 → 规则/LLM 研判        │
+│      ⑥ 回测     往期预测 vs 当前价 → 命中率回填           │
+│      ⑦ 产出     报告 HTML + 结构化数据 → MySQL           │
+└─────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────┐
+│  Docker Compose                                          │
+│  ┌──────────────────┐    ┌───────────────────────────┐  │
+│  │ zstock-web        │    │ zstock-mysql (mysql:8.0)  │  │
+│  │ Flask + gunicorn  │───▶│ 数据 + 报告统一入库        │  │
+│  │ 127.0.0.1:8501    │    │ utf8mb4，低内存调优        │  │
+│  └──────────────────┘    └───────────────────────────┘  │
+│            ↑  nginx 反代 /forecast/                      │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ## 目录结构
 
 ```
 Zstock/
-├── config.py          # 配置：路径/鉴权/抓取参数/43 项规则默认值/凭据校验
-├── scrapers.py        # 热股池、行情、K线、财务、消息面、指数广度
-├── indicators.py      # MA / MACD / RSI / KDJ
-├── analysis.py        # 三层打分 + 交叉验证 + 大盘预测 + 消息情绪
-├── llm.py             # LLM 研判（OpenAI 兼容，可降级）
-├── db.py              # SQLite 持久化 + 回测统计
-├── report_gen.py      # HTML 报告生成（无 JS、内联样式、涨红跌绿）
-├── webapp.py          # Flask 平台（登录鉴权 + 多页）
-├── run_pipeline.py    # cron 主入口
-├── templates/         # Jinja2 页面模板
-├── deploy/            # systemd / nginx / crontab / 一键部署
-├── docs/              # 部署指南 / 规则调参指南
-└── data/              # 运行时数据（报告、SQLite、规则配置，不入库）
+├── Dockerfile              # python:3.11-slim + gunicorn
+├── docker-compose.yml      # web + mysql 编排（低内存调优）
+├── config.py               # 配置：路径/鉴权/抓取参数/43 项规则默认值/凭据校验
+├── scrapers.py             # 热股池、行情、K线、财务、消息面、指数广度
+├── indicators.py           # MA / MACD / RSI / KDJ
+├── analysis.py             # 三层打分 + 交叉验证 + 大盘预测 + 消息情绪
+├── llm.py                  # LLM 研判（OpenAI 兼容，可降级）
+├── db.py                   # 数据层：MySQL（生产）/ SQLite（本地兜底）
+├── report_gen.py           # HTML 报告生成（无 JS、内联样式、涨红跌绿）
+├── webapp.py               # Flask 平台（登录鉴权 + 多页）
+├── run_pipeline.py         # cron 主入口
+├── templates/              # Jinja2 页面模板
+├── deploy/
+│   ├── install-docker.sh           # Docker 一键部署
+│   ├── migrate_sqlite_to_mysql.py  # SQLite → MySQL 迁移
+│   ├── mysql-tuning.cnf            # MySQL 低内存调优
+│   └── nginx-forecast.conf         # 反代片段
+├── docs/                   # 部署指南 / 规则调参指南
+└── data/                   # 运行时（规则/LLM 配置、文件副本，不入库）
 ```
 
 ## 配置
@@ -86,15 +101,34 @@ Zstock/
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
-| `SF_ADMIN_PASSWORD` | **必填** | 登录口令。缺失时拒绝启动（避免用已知口令上线） |
+| `SF_ADMIN_PASSWORD` | **必填** | 登录口令。缺失或弱口令时拒绝启动 |
 | `SF_ADMIN_USER` | 可选 | 登录账号，默认 `admin` |
 | `SF_SECRET_KEY` | 可选 | 会话签名密钥。缺省时自动生成并持久化到 `data/secret_key.txt` |
 | `SF_URL_PREFIX` | 可选 | 反代子路径前缀，生产 `/forecast`，本地调试留空 |
-| `LLM_API_BASE` | 可选 | OpenAI 兼容接口地址，如 `https://api.deepseek.com/v1` |
-| `LLM_API_KEY` | 可选 | LLM 密钥。不配置则降级为规则叙事 |
-| `LLM_MODEL` | 可选 | 模型名，默认 `deepseek-chat` |
+| `DB_HOST` | **生产必填** | MySQL 主机。留空则使用 SQLite 兜底（本地开发） |
+| `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` | 视情况 | MySQL 连接参数 |
+| `LLM_API_BASE` / `LLM_API_KEY` / `LLM_MODEL` | 可选 | LLM 研判，不配置则降级为规则叙事 |
 
-生产环境通过 `/etc/stock-forecast.env`（权限 600，不入库）注入，见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
+生产用项目根目录 `.env`（Docker Compose 自动加载，**已 gitignore，权限 600**），由 `install-docker.sh` 生成。
+
+### 数据持久化
+
+**生产（Docker + MySQL）**：结构化数据 + 报告 HTML 全部入 MySQL（`zstock` 库），`mysqldump` 一条命令即完整备份：
+
+```bash
+docker compose exec -T mysql sh -c 'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" zstock' > backup.sql
+```
+
+| 表 | 内容 |
+|---|---|
+| `runs` | 每期运行元数据（大盘判断、消息窗口、样本数） |
+| `reports` | 报告 HTML + JSON 全文 |
+| `predictions` | 个股预测（方向/置信度/三层得分/回测结果） |
+| `quotes_snap` | 行情快照（价/PE/PB/均线/RSI） |
+| `pool_items` | 热股池（来源、排名、抓取时间） |
+| `news_items` | 消息面快讯 |
+
+**本地开发（SQLite）**：未设 `DB_HOST` 时用 `data/forecast.db`，结构一致。
 
 ### 可调规则（43 项）
 
@@ -134,10 +168,10 @@ Zstock/
 ## 定时任务
 
 ```cron
-0 22 * * * TZ=Asia/Shanghai /var/www/stock-forecast/venv/bin/python /var/www/stock-forecast/run_pipeline.py
+0 22 * * * cd /var/www/stock-forecast && /usr/bin/docker compose exec -T web python run_pipeline.py >> /var/log/stock-forecast-cron.log 2>&1
 ```
 
-每日 22:00 执行，消息面窗口 = 当日 00:00 至执行时点，预测**次一交易日**。
+每日 22:00 在容器内执行，消息面窗口 = 当日 00:00 至执行时点，预测**次一交易日**。
 
 ## 已知限制
 

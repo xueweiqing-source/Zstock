@@ -2,6 +2,26 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 思路记录变更。
 
+## [1.2.0] - 2026-10-27
+
+### 变更
+- **部署模式改为 Docker Compose**：`zstock-web`（Flask + gunicorn）+ `zstock-mysql`（mysql:8.0），替换原 systemd + 裸机 venv
+- **数据层迁移到 MySQL**：结构化数据 + 报告 HTML 全部入库，`mysqldump` 一条命令即完整备份；保留 SQLite 兜底（未设 `DB_HOST` 时本地开发可用）
+- **新增 `reports` 表**：报告 HTML/JSON 全文入库，报告页优先从库读取
+- **MySQL 低内存调优**：`innodb_buffer_pool_size=128M`、关 performance_schema 等，适配 2G 主机（实测 MySQL 145M + web 40M）
+- cron 改为 `docker compose exec web python run_pipeline.py`
+- 移除 systemd 服务文件，新增 `install-docker.sh` 一键 Docker 部署
+
+### 新增
+- `Dockerfile`（python:3.11-slim）
+- `docker-compose.yml`（web + mysql，健康检查，内存限额）
+- `deploy/mysql-tuning.cnf`（MySQL 调优）
+- `deploy/migrate_sqlite_to_mysql.py`（SQLite → MySQL 迁移，可重复执行）
+- `deploy/install-docker.sh`（一键部署 + 自动数据迁移）
+
+### 修复
+- MySQL 8 `rank` 保留字导致建表失败（加反引号）
+
 ## [1.1.0] - 2026-10-27
 
 ### 新增

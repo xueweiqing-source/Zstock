@@ -3,6 +3,10 @@ data/
 *.db
 *.log
 
+# 凭据（Docker Compose 用，绝不入库）
+.env
+*.env
+
 # Python
 venv/
 __pycache__/

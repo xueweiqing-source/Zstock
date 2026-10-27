@@ -432,10 +432,13 @@ def report(run_id: str):
     # run_id 只允许数字下划线
     if not run_id.replace("_", "").isdigit():
         abort(404)
-    path = C.REPORTS_DIR / f"report_{run_id}.html"
-    if not path.exists():
-        abort(404)
-    html_text = path.read_text(encoding="utf-8")
+    # 优先从数据库读（生产 MySQL），否则回退文件
+    html_text = D.get_report_html(run_id)
+    if not html_text:
+        path = C.REPORTS_DIR / f"report_{run_id}.html"
+        if not path.exists():
+            abort(404)
+        html_text = path.read_text(encoding="utf-8")
     bar = (
         f"<div style='position:sticky;top:0;z-index:99;background:#1a5276;color:#fff;"
         f"padding:10px 18px;font-family:sans-serif;font-size:13px;display:flex;"

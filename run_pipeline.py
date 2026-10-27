@@ -225,17 +225,18 @@ def run() -> dict:
     }
 
     html_text = R.render_report(result)
+    json_text = json.dumps(result, ensure_ascii=False, indent=1, default=str)
 
+    # 同时落文件（便于直接归档）与入库（便于统一备份）
     html_path = C.REPORTS_DIR / f"report_{run_id}.html"
     json_path = C.REPORTS_DIR / f"report_{run_id}.json"
     html_path.write_text(html_text, encoding="utf-8")
-    json_path.write_text(
-        json.dumps(result, ensure_ascii=False, indent=1, default=str),
-        encoding="utf-8",
-    )
+    json_path.write_text(json_text, encoding="utf-8")
     (C.REPORTS_DIR / "latest.txt").write_text(html_path.name, encoding="utf-8")
 
     result["_html_path"] = str(html_path)
+    result["_html_text"] = html_text
+    result["_json_text"] = json_text
     D.save_run(result)
 
     elapsed = time.time() - t0
