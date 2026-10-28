@@ -21,7 +21,16 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
         },
         ...opts,
       });
-      if (res.status === 401) { window.location.hash = '#/login'; throw new Error('未登录'); }
+      if (res.status === 401) {
+        // 解析服务端具体错误（如"账号或密码错误"），而非一律显示"未登录"
+        let msg = '请先登录';
+        try { msg = (await res.json()).message || msg; } catch (e) {}
+        // 登录接口自身的 401 不跳转（已在登录页），其余 401 跳回登录
+        if (!url.includes('/login')) {
+          window.location.hash = '#/login';
+        }
+        throw new Error(msg);
+      }
       if (!res.ok) {
         let msg = '请求失败';
         try { msg = (await res.json()).message || msg; } catch (e) {}
