@@ -23,6 +23,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 import config as C
 import db as D
+import scrapers as S
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 C.validate_security()
@@ -198,12 +199,18 @@ def api_dashboard():
             conf_dist[c] = conf_dist.get(c, 0) + 1
     llm_cfg = C.load_llm_config()
     llm_on = bool(llm_cfg.get("enabled") and llm_cfg.get("api_base") and llm_cfg.get("api_key"))
+    # 市场指数概览（A股/港股/全球），合并进 dashboard 一次拿全
+    try:
+        market = S.fetch_market_overview()
+    except Exception:  # noqa: BLE001
+        market = {}
     return jsonify({
         "latest": latest,
         "runs": runs,
         "distribution": dist,
         "confidence_dist": conf_dist,
         "backtest": D.backtest_summary(),
+        "market": market,
         "engine": {
             "llm_enabled": llm_on,
             "model": llm_cfg.get("model") if llm_on else None,
@@ -270,6 +277,17 @@ def api_stock(market: str, code: str):
 def api_backtest():
     D.init_db()
     return jsonify(D.backtest_summary())
+
+
+@app.route("/api/indices")
+@login_required
+def api_indices():
+    """仪表盘三分区市场概览：A股 / 港股 / 全球指数"""
+    try:
+        data = S.fetch_market_overview()
+        return jsonify(data)
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": "fetch_failed", "message": f"获取指数数据失败: {e}"}), 502
 
 
 @app.route("/api/settings", methods=["GET"])

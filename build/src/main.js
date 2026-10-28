@@ -154,6 +154,62 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
       <div>
         <h2 class="page-title">仪表盘</h2>
         <p class="page-desc">每日 22:00 自动运行，预测次一交易日 · 研判引擎：{{ data.engine?.label || '—' }}</p>
+
+        <!-- 市场概览：A股 / 港股 / 全球 -->
+        <a-card title="市场概览" size="small" style="margin-bottom:16px">
+          <a-spin :spinning="mktLoading">
+            <!-- A股 -->
+            <div class="market-section">
+              <div class="market-label">A股</div>
+              <div class="index-grid">
+                <div class="index-item" v-for="idx in (market.a_shares?.indices || [])" :key="idx.name">
+                  <div class="index-name">{{ idx.name }}</div>
+                  <div class="index-price" :class="pctCls(idx.change_pct)">{{ fmt(idx.price, 2) }}</div>
+                  <div class="index-pct" :class="pctCls(idx.change_pct)">{{ pctStr(idx.change_pct) }}</div>
+                </div>
+              </div>
+              <div class="breadth-wrap" v-if="market.a_shares?.breadth?.up">
+                <div class="breadth-track">
+                  <div class="breadth-up" :style="{width: upPct + '%'}"></div>
+                  <div class="breadth-down" :style="{width: downPct + '%'}"></div>
+                </div>
+                <div class="breadth-text">涨 {{ market.a_shares.breadth.up }} · 跌 {{ market.a_shares.breadth.down }} · 平 {{ market.a_shares.breadth.flat }}</div>
+              </div>
+            </div>
+
+            <!-- 港股 -->
+            <div class="market-section">
+              <div class="market-label">港股</div>
+              <div class="index-grid">
+                <div class="index-item" v-for="idx in (market.hk?.indices || [])" :key="idx.name">
+                  <div class="index-name">{{ idx.name }}</div>
+                  <div class="index-price" :class="pctCls(idx.change_pct)">{{ fmt(idx.price, 2) }}</div>
+                  <div class="index-pct" :class="pctCls(idx.change_pct)">{{ pctStr(idx.change_pct) }}</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 全球：美股 + 亚太 -->
+            <div class="market-section">
+              <div class="market-label">全球</div>
+              <div class="index-grid" style="margin-bottom:12px">
+                <div class="index-item" v-for="idx in (market.global?.us || [])" :key="idx.name">
+                  <div class="index-name">🇺🇸 {{ idx.name }}</div>
+                  <div class="index-price" :class="pctCls(idx.change_pct)">{{ fmt(idx.price, 2) }}</div>
+                  <div class="index-pct" :class="pctCls(idx.change_pct)">{{ pctStr(idx.change_pct) }}</div>
+                </div>
+              </div>
+              <div class="index-grid">
+                <div class="index-item" v-for="idx in (market.global?.asia || [])" :key="idx.name">
+                  <div class="index-name">🌏 {{ idx.name }}</div>
+                  <div class="index-price" :class="pctCls(idx.change_pct)">{{ fmt(idx.price, 2) }}</div>
+                  <div class="index-pct" :class="pctCls(idx.change_pct)">{{ pctStr(idx.change_pct) }}</div>
+                </div>
+              </div>
+            </div>
+          </a-spin>
+        </a-card>
+
         <a-spin :spinning="loading">
           <div class="stat-row" v-if="data.latest">
             <div class="stat-item">
@@ -224,10 +280,27 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
     setup() {
       const data = ref({}); const loading = ref(true);
       const factors = ref([]);
+      // 市场指数从 dashboard API 合并返回，消除单独调用的时序问题
+      const market = computed(() => data.value.market || {});
+      const mktLoading = computed(() => loading.value);
       const bt = computed(() => data.value.backtest?.total || {});
       const trendClass = computed(() => {
         const t = data.value.latest?.market_trend;
         return t === '偏多' ? 'pos' : t === '偏空' ? 'neg' : '';
+      });
+      const pctCls = (v) => v > 0 ? 'c-up' : v < 0 ? 'c-down' : 'c-flat';
+      const pctStr = (v) => v == null ? '—' : (v > 0 ? '+' : '') + Number(v).toFixed(2) + '%';
+      const upPct = computed(() => {
+        const b = market.value.a_shares?.breadth;
+        if (!b) return 50;
+        const total = (b.up || 0) + (b.down || 0) + (b.flat || 0);
+        return total ? Math.round((b.up / total) * 100) : 50;
+      });
+      const downPct = computed(() => {
+        const b = market.value.a_shares?.breadth;
+        if (!b) return 50;
+        const total = (b.up || 0) + (b.down || 0) + (b.flat || 0);
+        return total ? Math.round((b.down / total) * 100) : 50;
       });
       const runCols = [
         { title: '期号', dataIndex: 'run_id', key: 'run_id' },
@@ -240,13 +313,18 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
       ];
       onMounted(async () => {
         try {
-          data.value = await api.get(apiUrl('dashboard'));
-          factors.value = (data.value.latest?.market_factors && typeof data.value.latest.market_factors === 'string')
-            ? JSON.parse(data.value.latest.market_factors || '[]') : (data.value.latest?.market_factors || []);
+          const d = await api.get(apiUrl('dashboard'));
+          data.value = d;
+          factors.value = (d.latest?.market_factors && typeof d.latest.market_factors === 'string')
+            ? JSON.parse(d.latest.market_factors || '[]') : (d.latest?.market_factors || []);
         } catch (e) { console.error(e); }
         loading.value = false;
       });
-      return { data, loading, factors, bt, trendClass, runCols, fmt, dirTag, confTag, go: (h) => window.location.hash = h };
+      return {
+        data, loading, market, mktLoading, factors, bt, trendClass,
+        pctCls, pctStr, upPct, downPct,
+        runCols, fmt, dirTag, confTag, go: (h) => window.location.hash = h,
+      };
     },
   };
 

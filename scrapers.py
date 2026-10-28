@@ -534,3 +534,144 @@ def fetch_indices() -> Dict[str, Any]:
 def fetch_index_kline(market: str = "SH", code: str = "000001", days: int = 120) -> List[dict]:
     """指数日线，用于趋势判断"""
     return fetch_kline(market, code, days)
+
+
+# ============================================================
+# 全球市场概览（仪表盘三分区：A股 / 港股 / 全球）
+# ============================================================
+
+_MARKET_SECS = {
+    "a_shares": {
+        "1.000001": "上证指数",
+        "0.399001": "深证成指",
+        "0.399006": "创业板指",
+        "1.000688": "科创50",
+    },
+    "hk": {
+        "100.HSI": "恒生指数",
+        "100.HSTECH": "恒生科技",
+    },
+    "us": {
+        "100.DJIA": "道琼斯",
+        "100.SPX": "标普500",
+        "100.NDX": "纳斯达克",
+    },
+    "asia": {
+        "100.N225": "日经225",
+        "100.KS11": "韩国KOSPI",
+    },
+}
+
+
+def _fetch_index_batch(secmap: Dict[str, str]) -> List[Dict]:
+    """用东财 ulist.np 批量拉指数，返回统一格式"""
+    if not secmap:
+        return []
+    secids = ",".join(secmap.keys())
+    url = (
+        "https://push2.eastmoney.com/api/qt/ulist.np/get"
+        f"?fltt=2&secids={secids}&fields=f2,f3,f4,f5,f6,f12,f14"
+    )
+    data = _get(url, headers={"User-Agent": C.USER_AGENT, "Referer": "https://quote.eastmoney.com/"})
+    rows = []
+    if isinstance(data, dict):
+        for item in ((data.get("data") or {}).get("diff")) or []:
+            secid = f"{item.get('f13', '')}.{item.get('f12', '')}"
+            name = secmap.get(secid) or item.get("f14") or ""
+            if not name:
+                continue
+            rows.append({
+                "name": name,
+                "price": item.get("f2"),
+                "change_pct": item.get("f3"),
+                "change": item.get("f4"),
+                "volume_wan": item.get("f5"),   # 成交量（手）
+                "amount_yi": item.get("f6"),    # 成交额（元）
+                "code": item.get("f12"),
+            })
+    return rows
+
+
+def _fetch_index_tencent(codes: Dict[str, str]) -> List[Dict]:
+    """腾讯快照兜底（港股指数）"""
+    if not codes:
+        return []
+    symbols = ",".join(codes.keys())
+    text = _get(f"https://qt.gtimg.cn/q={symbols}")
+    rows = []
+    if isinstance(text, str):
+        for line in text.splitlines():
+            q = parse_tencent_quote(line)
+            if not q:
+                continue
+            sym = line.split("=")[0].split("_")[-1].strip()
+            name = codes.get(sym) or q.get("name") or sym
+            rows.append({
+                "name": name, "price": q["price"],
+                "change_pct": q["change_pct"], "change": q["change"],
+                "code": q["code"], "volume_wan": None, "amount_yi": None,
+            })
+    return rows
+
+
+# 市场概览内存缓存（60s），避免每次页面加载都打外部接口
+_mkt_cache: Dict[str, Any] = {}
+
+
+def fetch_market_overview() -> Dict[str, Any]:
+    """仪表盘三分区：A股 / 港股 / 全球（含涨跌分布）
+
+    并行拉取 + 60s 内存缓存，避免串行请求拖慢 dashboard。
+    """
+    now = time.time()
+    if _mkt_cache.get("data") and (now - _mkt_cache.get("ts", 0)) < 60:
+        return _mkt_cache["data"]
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _do_a():
+        rows = _fetch_index_batch(_MARKET_SECS["a_shares"])
+        breadth = {}
+        secids = ",".join(_MARKET_SECS["a_shares"].keys())
+        bdata = _get(
+            f"https://push2.eastmoney.com/api/qt/ulist.np/get"
+            f"?fltt=2&secids={secids}&fields=f12,f14,f104,f105,f106",
+            headers={"User-Agent": C.USER_AGENT, "Referer": "https://quote.eastmoney.com/"},
+        )
+        if isinstance(bdata, dict):
+            for item in ((bdata.get("data") or {}).get("diff")) or []:
+                if item.get("f104") is not None:
+                    breadth = {
+                        "up": item.get("f104"), "down": item.get("f105"),
+                        "flat": item.get("f106"), "source": C.SRC_EASTMONEY,
+                    }
+                    break
+        return {"indices": rows, "breadth": breadth}
+
+    def _do_hk():
+        rows = _fetch_index_batch(_MARKET_SECS["hk"])
+        if len(rows) < 2:
+            rows = _fetch_index_tencent({"hkHSI": "恒生指数", "hkHSTECH": "恒生科技"})
+        return {"indices": rows}
+
+    def _do_us():
+        return {"us": _fetch_index_batch(_MARKET_SECS["us"])}
+
+    def _do_asia():
+        return {"asia": _fetch_index_batch(_MARKET_SECS["asia"])}
+
+    out: Dict[str, Any] = {"fetched_at": _now_iso()}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        fa = pool.submit(_do_a)
+        fh = pool.submit(_do_hk)
+        fu = pool.submit(_do_us)
+        fs = pool.submit(_do_asia)
+        out["a_shares"] = fa.result(timeout=10)
+        out["hk"] = fh.result(timeout=10)
+        g_us = fu.result(timeout=10)
+        g_asia = fs.result(timeout=10)
+        out["global"] = {**g_us, **g_asia}
+
+    _mkt_cache["data"] = out
+    _mkt_cache["ts"] = time.time()
+    return out
