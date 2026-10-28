@@ -156,56 +156,110 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
         <p class="page-desc">每日 22:00 自动运行，预测次一交易日 · 研判引擎：{{ data.engine?.label || '—' }}</p>
 
         <!-- 市场概览：A股 / 港股 / 全球 -->
-        <a-card title="市场概览" size="small" style="margin-bottom:16px">
+        <a-card size="small" style="margin-bottom:16px">
+          <template #title>
+            <span style="font-size:15px;font-weight:600">市场概览</span>
+            <span style="margin-left:12px;font-size:12px;color:rgba(0,0,0,.45);font-weight:400">
+              {{ market.fetched_at ? '数据时间 ' + market.fetched_at : '' }}
+            </span>
+          </template>
           <a-spin :spinning="mktLoading">
             <!-- A股 -->
-            <div class="market-section">
-              <div class="market-label">A股</div>
+            <div class="market-section" v-if="(market.a_shares?.indices || []).length || market.a_shares?.breadth?.up">
+              <div class="market-hd">
+                <div class="market-label">A股</div>
+                <div class="market-turnover" v-if="market.a_shares?.turnover?.total_yi">
+                  两市成交 <b>{{ fmt(market.a_shares.turnover.total_yi, 0) }}</b> 亿
+                  <span class="turnover-split">（沪 {{ fmt(market.a_shares.turnover.sh_yi, 0) }} 亿 · 深 {{ fmt(market.a_shares.turnover.sz_yi, 0) }} 亿）</span>
+                </div>
+              </div>
               <div class="index-grid">
                 <div class="index-item" v-for="idx in (market.a_shares?.indices || [])" :key="idx.name">
                   <div class="index-name">{{ idx.name }}</div>
                   <div class="index-price" :class="pctCls(idx.change_pct)">{{ fmt(idx.price, 2) }}</div>
-                  <div class="index-pct" :class="pctCls(idx.change_pct)">{{ pctStr(idx.change_pct) }}</div>
+                  <div class="index-row">
+                    <span class="index-chg" :class="pctCls(idx.change_pct)">{{ chgStr(idx.change) }}</span>
+                    <span class="index-pct" :class="pctCls(idx.change_pct)">{{ pctStr(idx.change_pct) }}</span>
+                  </div>
+                  <div class="index-amt" v-if="idx.amount_yi != null">{{ amtStr(idx.amount_yi) }}</div>
                 </div>
               </div>
-              <div class="breadth-wrap" v-if="market.a_shares?.breadth?.up">
+              <div class="breadth-wrap" v-if="market.a_shares?.breadth?.up != null">
                 <div class="breadth-track">
                   <div class="breadth-up" :style="{width: upPct + '%'}"></div>
+                  <div class="breadth-flat" :style="{width: flatPct + '%'}"></div>
                   <div class="breadth-down" :style="{width: downPct + '%'}"></div>
                 </div>
-                <div class="breadth-text">涨 {{ market.a_shares.breadth.up }} · 跌 {{ market.a_shares.breadth.down }} · 平 {{ market.a_shares.breadth.flat }}</div>
+                <div class="breadth-text">
+                  <span class="c-up">涨 {{ market.a_shares.breadth.up }}</span>
+                  · <span class="c-flat">平 {{ market.a_shares.breadth.flat }}</span>
+                  · <span class="c-down">跌 {{ market.a_shares.breadth.down }}</span>
+                </div>
               </div>
             </div>
 
             <!-- 港股 -->
-            <div class="market-section">
-              <div class="market-label">港股</div>
+            <div class="market-section" v-if="(market.hk?.indices || []).length">
+              <div class="market-hd">
+                <div class="market-label">港股</div>
+              </div>
               <div class="index-grid">
                 <div class="index-item" v-for="idx in (market.hk?.indices || [])" :key="idx.name">
                   <div class="index-name">{{ idx.name }}</div>
                   <div class="index-price" :class="pctCls(idx.change_pct)">{{ fmt(idx.price, 2) }}</div>
-                  <div class="index-pct" :class="pctCls(idx.change_pct)">{{ pctStr(idx.change_pct) }}</div>
+                  <div class="index-row">
+                    <span class="index-chg" :class="pctCls(idx.change_pct)">{{ chgStr(idx.change) }}</span>
+                    <span class="index-pct" :class="pctCls(idx.change_pct)">{{ pctStr(idx.change_pct) }}</span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <!-- 全球：美股 + 亚太 -->
-            <div class="market-section">
-              <div class="market-label">全球</div>
-              <div class="index-grid" style="margin-bottom:12px">
-                <div class="index-item" v-for="idx in (market.global?.us || [])" :key="idx.name">
-                  <div class="index-name">🇺🇸 {{ idx.name }}</div>
-                  <div class="index-price" :class="pctCls(idx.change_pct)">{{ fmt(idx.price, 2) }}</div>
-                  <div class="index-pct" :class="pctCls(idx.change_pct)">{{ pctStr(idx.change_pct) }}</div>
+            <!-- 全球：美股 / 亚太 / 欧洲 -->
+            <div class="market-section" v-if="hasGlobal">
+              <div class="market-hd">
+                <div class="market-label">全球</div>
+              </div>
+              <div class="global-block" v-if="(market.global?.us || []).length">
+                <div class="global-tag">🇺🇸 美股</div>
+                <div class="index-grid">
+                  <div class="index-item" v-for="idx in (market.global.us || [])" :key="idx.name">
+                    <div class="index-name">{{ idx.name }}</div>
+                    <div class="index-price" :class="pctCls(idx.change_pct)">{{ fmt(idx.price, 2) }}</div>
+                    <div class="index-row">
+                      <span class="index-pct" :class="pctCls(idx.change_pct)">{{ pctStr(idx.change_pct) }}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div class="index-grid">
-                <div class="index-item" v-for="idx in (market.global?.asia || [])" :key="idx.name">
-                  <div class="index-name">🌏 {{ idx.name }}</div>
-                  <div class="index-price" :class="pctCls(idx.change_pct)">{{ fmt(idx.price, 2) }}</div>
-                  <div class="index-pct" :class="pctCls(idx.change_pct)">{{ pctStr(idx.change_pct) }}</div>
+              <div class="global-block" v-if="(market.global?.asia || []).length">
+                <div class="global-tag">🌏 亚太</div>
+                <div class="index-grid">
+                  <div class="index-item" v-for="idx in (market.global.asia || [])" :key="idx.name">
+                    <div class="index-name">{{ idx.name }}</div>
+                    <div class="index-price" :class="pctCls(idx.change_pct)">{{ fmt(idx.price, 2) }}</div>
+                    <div class="index-row">
+                      <span class="index-pct" :class="pctCls(idx.change_pct)">{{ pctStr(idx.change_pct) }}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
+              <div class="global-block" v-if="(market.global?.europe || []).length">
+                <div class="global-tag">🌍 欧洲</div>
+                <div class="index-grid">
+                  <div class="index-item" v-for="idx in (market.global.europe || [])" :key="idx.name">
+                    <div class="index-name">{{ idx.name }}</div>
+                    <div class="index-price" :class="pctCls(idx.change_pct)">{{ fmt(idx.price, 2) }}</div>
+                    <div class="index-row">
+                      <span class="index-pct" :class="pctCls(idx.change_pct)">{{ pctStr(idx.change_pct) }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="!mktLoading && !hasAnyMarket" style="padding:24px 0;text-align:center;color:rgba(0,0,0,.35)">
+              行情数据暂不可用，请稍后刷新
             </div>
           </a-spin>
         </a-card>
@@ -290,17 +344,33 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
       });
       const pctCls = (v) => v > 0 ? 'c-up' : v < 0 ? 'c-down' : 'c-flat';
       const pctStr = (v) => v == null ? '—' : (v > 0 ? '+' : '') + Number(v).toFixed(2) + '%';
+      const chgStr = (v) => v == null ? '' : (v > 0 ? '+' : '') + Number(v).toFixed(2);
+      const amtStr = (v) => {
+        if (v == null) return '';
+        const yi = Number(v) / 1e8;
+        return yi >= 10000 ? (yi / 10000).toFixed(2) + '万亿' : yi.toFixed(0) + '亿';
+      };
       const upPct = computed(() => {
         const b = market.value.a_shares?.breadth;
-        if (!b) return 50;
+        if (!b || b.up == null) return 50;
         const total = (b.up || 0) + (b.down || 0) + (b.flat || 0);
-        return total ? Math.round((b.up / total) * 100) : 50;
+        return total ? (b.up / total) * 100 : 50;
       });
       const downPct = computed(() => {
         const b = market.value.a_shares?.breadth;
-        if (!b) return 50;
+        if (!b || b.down == null) return 50;
         const total = (b.up || 0) + (b.down || 0) + (b.flat || 0);
-        return total ? Math.round((b.down / total) * 100) : 50;
+        return total ? (b.down / total) * 100 : 50;
+      });
+      const flatPct = computed(() => Math.max(0, 100 - upPct.value - downPct.value));
+      const hasGlobal = computed(() => {
+        const g = market.value.global || {};
+        return ((g.us || []).length + (g.asia || []).length + (g.europe || []).length) > 0;
+      });
+      const hasAnyMarket = computed(() => {
+        return ((market.value.a_shares?.indices || []).length
+          + (market.value.hk?.indices || []).length
+          + (hasGlobal.value ? 1 : 0)) > 0;
       });
       const runCols = [
         { title: '期号', dataIndex: 'run_id', key: 'run_id' },
@@ -322,7 +392,7 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
       });
       return {
         data, loading, market, mktLoading, factors, bt, trendClass,
-        pctCls, pctStr, upPct, downPct,
+        pctCls, pctStr, chgStr, amtStr, upPct, downPct, flatPct, hasGlobal, hasAnyMarket,
         runCols, fmt, dirTag, confTag, go: (h) => window.location.hash = h,
       };
     },

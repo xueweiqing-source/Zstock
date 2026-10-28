@@ -546,49 +546,82 @@ _MARKET_SECS = {
         "0.399001": "深证成指",
         "0.399006": "创业板指",
         "1.000688": "科创50",
+        "1.000300": "沪深300",
+    },
+    "a_turnover": {
+        "1.000001": "沪市",
+        "0.399106": "深市",   # 深证综指：覆盖全部深市个股，用于成交额合计
     },
     "hk": {
         "100.HSI": "恒生指数",
         "100.HSTECH": "恒生科技",
+        "100.HSCEI": "国企指数",
     },
     "us": {
         "100.DJIA": "道琼斯",
         "100.SPX": "标普500",
         "100.NDX": "纳斯达克",
+        "100.NDX100": "纳斯达克100",
     },
     "asia": {
         "100.N225": "日经225",
         "100.KS11": "韩国KOSPI",
+        "100.STI": "新加坡海峡",
+        "100.SENSEX": "印度SENSEX",
     },
+    "europe": {
+        "100.FTSE": "英国富时100",
+        "100.GDAXI": "德国DAX",
+        "100.FCHI": "法国CAC40",
+    },
+}
+
+# 腾讯兜底代码（东财挂了时用）
+_TENCENT_FALLBACK = {
+    "us": {"usDJI": "道琼斯", "usIXIC": "纳斯达克", "usINX": "标普500"},
+    "hk": {"hkHSI": "恒生指数", "hkHSTECH": "恒生科技"},
 }
 
 
 def _fetch_index_batch(secmap: Dict[str, str]) -> List[Dict]:
-    """用东财 ulist.np 批量拉指数，返回统一格式"""
+    """用东财 ulist.np 批量拉指数，返回统一格式。
+
+    注意：fields 必须含 f13，否则响应里 f13=null，secid 拼不出来。
+    匹配时同时用 secid 与 f12 代码，避免单点失败。
+    """
     if not secmap:
         return []
     secids = ",".join(secmap.keys())
     url = (
         "https://push2.eastmoney.com/api/qt/ulist.np/get"
-        f"?fltt=2&secids={secids}&fields=f2,f3,f4,f5,f6,f12,f14"
+        f"?fltt=2&secids={secids}&fields=f2,f3,f4,f5,f6,f12,f13,f14"
     )
     data = _get(url, headers={"User-Agent": C.USER_AGENT, "Referer": "https://quote.eastmoney.com/"})
-    rows = []
-    if isinstance(data, dict):
-        for item in ((data.get("data") or {}).get("diff")) or []:
-            secid = f"{item.get('f13', '')}.{item.get('f12', '')}"
-            name = secmap.get(secid) or item.get("f14") or ""
-            if not name:
-                continue
-            rows.append({
-                "name": name,
-                "price": item.get("f2"),
-                "change_pct": item.get("f3"),
-                "change": item.get("f4"),
-                "volume_wan": item.get("f5"),   # 成交量（手）
-                "amount_yi": item.get("f6"),    # 成交额（元）
-                "code": item.get("f12"),
-            })
+    rows: List[Dict] = []
+    if not isinstance(data, dict):
+        return rows
+    # 反查：code → 规范名（用于 f13 缺失时兜底）
+    code_name = {k.split(".")[-1]: v for k, v in secmap.items()}
+    for item in ((data.get("data") or {}).get("diff")) or []:
+        f12, f13 = item.get("f12"), item.get("f13")
+        secid = f"{f13}.{f12}" if f13 is not None else ""
+        name = secmap.get(secid) or code_name.get(f12 or "") or item.get("f14") or ""
+        if not name:
+            continue
+        price = item.get("f2")
+        pct = item.get("f3")
+        # 东财对停牌/无数据会返回 "-"，过滤掉
+        if not isinstance(price, (int, float)) or not isinstance(pct, (int, float)):
+            continue
+        rows.append({
+            "name": name,
+            "price": price,
+            "change_pct": pct,
+            "change": item.get("f4") if isinstance(item.get("f4"), (int, float)) else None,
+            "volume_wan": item.get("f5") if isinstance(item.get("f5"), (int, float)) else None,
+            "amount_yi": item.get("f6") if isinstance(item.get("f6"), (int, float)) else None,
+            "code": f12,
+        })
     return rows
 
 
@@ -619,9 +652,10 @@ _mkt_cache: Dict[str, Any] = {}
 
 
 def fetch_market_overview() -> Dict[str, Any]:
-    """仪表盘三分区：A股 / 港股 / 全球（含涨跌分布）
+    """仪表盘市场概览：A股 / 港股 / 全球（美股·亚太·欧洲）
 
-    并行拉取 + 60s 内存缓存，避免串行请求拖慢 dashboard。
+    并行拉取 + 60s 内存缓存。任一分区为空时尝试腾讯兜底；
+    仅当至少拿到一组有效数据时才写缓存，避免把失败结果缓存住。
     """
     now = time.time()
     if _mkt_cache.get("data") and (now - _mkt_cache.get("ts", 0)) < 60:
@@ -631,7 +665,18 @@ def fetch_market_overview() -> Dict[str, Any]:
 
     def _do_a():
         rows = _fetch_index_batch(_MARKET_SECS["a_shares"])
-        breadth = {}
+        # 两市成交额（沪市 + 深证综指），东财 f6 单位为元
+        turnover_rows = _fetch_index_batch(_MARKET_SECS["a_turnover"])
+        sh_amt = next((r["amount_yi"] for r in turnover_rows if r.get("code") == "000001"), None)
+        sz_amt = next((r["amount_yi"] for r in turnover_rows if r.get("code") == "399106"), None)
+        turnover = {}
+        if sh_amt is not None and sz_amt is not None:
+            turnover = {
+                "total_yi": round((sh_amt + sz_amt) / 1e8, 1),
+                "sh_yi": round(sh_amt / 1e8, 1),
+                "sz_yi": round(sz_amt / 1e8, 1),
+            }
+        breadth: Dict[str, Any] = {}
         secids = ",".join(_MARKET_SECS["a_shares"].keys())
         bdata = _get(
             f"https://push2.eastmoney.com/api/qt/ulist.np/get"
@@ -646,32 +691,70 @@ def fetch_market_overview() -> Dict[str, Any]:
                         "flat": item.get("f106"), "source": C.SRC_EASTMONEY,
                     }
                     break
-        return {"indices": rows, "breadth": breadth}
+        return {"indices": rows, "breadth": breadth, "turnover": turnover}
 
     def _do_hk():
         rows = _fetch_index_batch(_MARKET_SECS["hk"])
-        if len(rows) < 2:
-            rows = _fetch_index_tencent({"hkHSI": "恒生指数", "hkHSTECH": "恒生科技"})
+        # 东财偶发漏返回，腾讯补缺
+        trows = _fetch_index_tencent(_TENCENT_FALLBACK["hk"])
+        for t in trows:
+            if not any(r["name"] == t["name"] for r in rows):
+                rows.append(t)
         return {"indices": rows}
 
     def _do_us():
-        return {"us": _fetch_index_batch(_MARKET_SECS["us"])}
+        rows = _fetch_index_batch(_MARKET_SECS["us"])
+        # 腾讯补缺（东财偶发漏返回）
+        trows = _fetch_index_tencent(_TENCENT_FALLBACK["us"])
+        for t in trows:
+            if not any(r["name"] == t["name"] for r in rows):
+                rows.append(t)
+        return rows
 
     def _do_asia():
-        return {"asia": _fetch_index_batch(_MARKET_SECS["asia"])}
+        return _fetch_index_batch(_MARKET_SECS["asia"])
+
+    def _do_eu():
+        return _fetch_index_batch(_MARKET_SECS["europe"])
 
     out: Dict[str, Any] = {"fetched_at": _now_iso()}
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=5) as pool:
         fa = pool.submit(_do_a)
         fh = pool.submit(_do_hk)
         fu = pool.submit(_do_us)
         fs = pool.submit(_do_asia)
-        out["a_shares"] = fa.result(timeout=10)
-        out["hk"] = fh.result(timeout=10)
-        g_us = fu.result(timeout=10)
-        g_asia = fs.result(timeout=10)
-        out["global"] = {**g_us, **g_asia}
+        fe = pool.submit(_do_eu)
+        try:
+            out["a_shares"] = fa.result(timeout=12)
+        except Exception:
+            out["a_shares"] = {"indices": [], "breadth": {}, "turnover": {}}
+        try:
+            out["hk"] = fh.result(timeout=12)
+        except Exception:
+            out["hk"] = {"indices": []}
+        try:
+            us_rows = fu.result(timeout=12)
+        except Exception:
+            us_rows = []
+        try:
+            asia_rows = fs.result(timeout=12)
+        except Exception:
+            asia_rows = []
+        try:
+            eu_rows = fe.result(timeout=12)
+        except Exception:
+            eu_rows = []
+        out["global"] = {"us": us_rows, "asia": asia_rows, "europe": eu_rows}
 
-    _mkt_cache["data"] = out
-    _mkt_cache["ts"] = time.time()
+    # 只在拿到有效数据时缓存，空结果下次重试
+    got_any = bool(
+        (out.get("a_shares") or {}).get("indices")
+        or (out.get("hk") or {}).get("indices")
+        or out.get("global", {}).get("us")
+        or out.get("global", {}).get("asia")
+        or out.get("global", {}).get("europe")
+    )
+    if got_any:
+        _mkt_cache["data"] = out
+        _mkt_cache["ts"] = time.time()
     return out

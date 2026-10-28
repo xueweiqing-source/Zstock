@@ -32,20 +32,38 @@
   .mono { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 12px; }
   .link { color: #1677ff; cursor: pointer; }
   .link:hover { text-decoration: underline; }
-  .market-section { padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
-  .market-section:last-child { border-bottom: none; }
-  .market-label { font-size: 13px; font-weight: 600; color: rgba(0,0,0,.65); margin-bottom: 10px; }
-  .index-grid { display: flex; gap: 24px; flex-wrap: wrap; }
-  .index-item { min-width: 115px; }
-  .index-name { font-size: 12px; color: rgba(0,0,0,.45); margin-bottom: 2px; }
-  .index-price { font-size: 18px; font-weight: 600; line-height: 1.3; }
-  .index-pct { font-size: 12px; margin-top: 1px; }
+  /* ===== 市场概览 ===== */
+  .market-section { padding: 14px 0; border-bottom: 1px solid #f0f0f0; }
+  .market-section:last-child { border-bottom: none; padding-bottom: 4px; }
+  .market-hd { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+  .market-label { font-size: 13px; font-weight: 600; color: rgba(0,0,0,.75); position: relative; padding-left: 8px; }
+  .market-label::before { content: ''; position: absolute; left: 0; top: 2px; bottom: 2px; width: 3px; background: #1677ff; border-radius: 2px; }
+  .market-turnover { font-size: 12px; color: rgba(0,0,0,.55); }
+  .market-turnover b { color: rgba(0,0,0,.85); font-size: 14px; font-weight: 600; margin: 0 2px; }
+  .turnover-split { color: rgba(0,0,0,.4); margin-left: 4px; }
+  .index-grid { display: flex; gap: 12px; flex-wrap: wrap; }
+  .index-item {
+    flex: 1 1 0; min-width: 130px; max-width: 200px;
+    padding: 10px 12px 8px;
+    background: #fafafa; border: 1px solid #f0f0f0; border-radius: 6px;
+  }
+  .index-name { font-size: 12px; color: rgba(0,0,0,.55); margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .index-price { font-size: 18px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; }
+  .index-row { display: flex; align-items: baseline; gap: 6px; margin-top: 2px; }
+  .index-chg { font-size: 12px; font-variant-numeric: tabular-nums; }
+  .index-pct { font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .index-amt { font-size: 11px; color: rgba(0,0,0,.38); margin-top: 3px; }
   .c-up { color: #cf1322; } .c-down { color: #389e0d; } .c-flat { color: rgba(0,0,0,.65); }
-  .breadth-wrap { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
-  .breadth-track { flex: 1; height: 8px; border-radius: 4px; overflow: hidden; display: flex; background: #f0f0f0; }
+  .breadth-wrap { display: flex; align-items: center; gap: 14px; margin-top: 12px; padding: 8px 12px; background: #fafafa; border-radius: 6px; }
+  .breadth-track { flex: 1; height: 10px; border-radius: 5px; overflow: hidden; display: flex; background: #f0f0f0; }
   .breadth-up { background: #cf1322; height: 100%; }
+  .breadth-flat { background: #d9d9d9; height: 100%; }
   .breadth-down { background: #389e0d; height: 100%; }
-  .breadth-text { font-size: 12px; color: rgba(0,0,0,.45); white-space: nowrap; }
+  .breadth-text { font-size: 12px; color: rgba(0,0,0,.55); white-space: nowrap; }
+  .global-block { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 10px; }
+  .global-block:last-child { margin-bottom: 0; }
+  .global-tag { flex: 0 0 56px; font-size: 12px; color: rgba(0,0,0,.55); padding-top: 12px; }
+  .global-block .index-grid { flex: 1; }
 </style>
 </head>
 <body>
