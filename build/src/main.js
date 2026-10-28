@@ -95,7 +95,6 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
   ];
 
   const AppLayout = {
-    props: ['page', 'pageParams'],
     template: `
       <a-layout class="layout">
         <a-layout-sider class="sider" :width="208" theme="dark" v-model:collapsed="collapsed">
@@ -124,13 +123,15 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
           </a-layout-content>
         </a-layout>
       </a-layout>`,
+    props: ['page', 'pageParams', 'routeName'],
     setup(props) {
       const collapsed = ref(false);
       const user = ref(sessionStorage.getItem('user') || 'admin');
       const menu = menuItems;
+      // 用响应式 prop routeName，而非 window.location.hash（非响应式，路由变了不重算）
       const selectedKeys = computed(() => {
-        const hash = window.location.hash || '#/dashboard';
-        return [menuItems.find(m => hash.startsWith(m.key))?.key || '#/dashboard'];
+        const name = props.routeName || 'dashboard';
+        return [menuItems.find(m => m.key === '#/' + name)?.key || '#/dashboard'];
       });
       const pageTitle = computed(() => {
         const item = menuItems.find(m => selectedKeys.value[0] === m.key);
@@ -652,11 +653,9 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
     components: { LoginPage, AppLayout, Dashboard, RunsList, ReportDetail, StockDetail, Backtest, Settings },
     template: `
       <component v-if="isLogin" :is="'LoginPage'"></component>
-      <AppLayout v-else :page="currentPage" :pageParams="pageParams" />
+      <AppLayout v-else :page="currentPage" :pageParams="pageParams" :routeName="routeName" />
     `,
     setup() {
-      const route = ref(window.location.hash || '#/dashboard');
-      const me = ref(null);
       const parseRoute = () => {
         const h = (window.location.hash || '#/dashboard').slice(1);
         const seg = h.split('/').filter(Boolean);
@@ -668,26 +667,36 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
         window.scrollTo(0, 0);
       });
       const isLogin = computed(() => r.value.name === 'login');
+      // 传组件对象（而非字符串），AppLayout 内 <component :is> 才能解析
       const pageMap = {
-        dashboard: 'Dashboard', runs: 'RunsList', report: 'ReportDetail',
-        stock: 'StockDetail', backtest: 'Backtest', settings: 'Settings',
+        dashboard: Dashboard, runs: RunsList, report: ReportDetail,
+        stock: StockDetail, backtest: Backtest, settings: Settings,
       };
-      const currentPage = computed(() => pageMap[r.value.name] || 'Dashboard');
+      const currentPage = computed(() => pageMap[r.value.name] || Dashboard);
       const pageParams = computed(() => r.value.params);
+      const routeName = computed(() => r.value.name);
       onMounted(async () => {
-        // 未登录直接跳登录页
         if (r.value.name !== 'login') {
           try {
             const m = await api.get(apiUrl('me'));
-            me.value = m; sessionStorage.setItem('user', m.username);
+            sessionStorage.setItem('user', m.username);
             sessionStorage.setItem('csrf', m.csrf_token);
-          } catch (e) { /* api 已跳转 */ }
+          } catch (e) { /* 已跳转登录 */ }
         }
       });
-      return { isLogin, currentPage, pageParams };
+      return { isLogin, currentPage, pageParams, routeName };
     },
   };
 
 const app = createApp(App);
 app.use(Antd);
+// 全局注册页面组件，确保 <component :is="字符串"> 在任意层级可解析
+app.component('LoginPage', LoginPage);
+app.component('AppLayout', AppLayout);
+app.component('Dashboard', Dashboard);
+app.component('RunsList', RunsList);
+app.component('ReportDetail', ReportDetail);
+app.component('StockDetail', StockDetail);
+app.component('Backtest', Backtest);
+app.component('Settings', Settings);
 app.mount('#app');
