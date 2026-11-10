@@ -272,6 +272,53 @@ def api_stock(market: str, code: str):
     })
 
 
+@app.route("/api/stock/<market>/<code>/klines")
+@login_required
+def api_stock_klines(market: str, code: str):
+    """K 线数据（画图用）
+
+    口径优先级：qfq 前复权（实时）→ hfq 后复权（klines 表兜底）。
+    返回 fq 字段标注口径，前端展示用。
+    """
+    if market not in ("SH", "SZ", "HK") or not code.isalnum() or len(code) > 8:
+        return jsonify({"error": "bad_request"}), 400
+    days = min(max(request.args.get("days", 120, type=int), 10), 500)
+
+    rows: List[dict] = []
+    fq_used = "qfq"
+
+    # 1. 优先实时抓取 qfq（前复权，历史价与现价可比）
+    try:
+        import scrapers as S
+        rows = S.fetch_kline(market, code, days=days, fq="qfq")
+    except Exception:
+        rows = []
+
+    # 2. 实时失败或数据太少 → klines 表（hfq 后复权，回补/每日落库）
+    if len(rows) < 10:
+        try:
+            db_rows = D.get_klines(code, market, limit=days)
+            if db_rows:
+                rows = db_rows
+                fq_used = "hfq"
+        except Exception:
+            pass
+
+    out = []
+    for r in rows:
+        out.append({
+            "date": r.get("date", ""),
+            "open": r.get("open"),
+            "close": r.get("close"),
+            "low": r.get("low"),
+            "high": r.get("high"),
+            "volume": r.get("volume"),
+        })
+    fq_label = {"qfq": "前复权", "hfq": "后复权", "": "不复权"}.get(fq_used, fq_used)
+    return jsonify({"code": code, "market": market, "fq": fq_used,
+                    "fq_label": fq_label, "days": days, "rows": out})
+
+
 @app.route("/api/backtest")
 @login_required
 def api_backtest():

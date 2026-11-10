@@ -1,8 +1,13 @@
-/* Zstock 前端入口（esbuild 打包：vue + ant-design-vue + 页面逻辑） */
-import { createApp, ref, reactive, computed, onMounted, watch, h } from 'vue';
+/* Zstock 前端入口（esbuild 打包：vue + ant-design-vue + echarts + 页面逻辑） */
+import { createApp, ref, reactive, computed, onMounted, watch, h, onBeforeUnmount, nextTick } from 'vue';
 import * as Vue from 'vue';
 import Antd from 'ant-design-vue';
 import 'ant-design-vue/dist/reset.css';
+import * as echarts from 'echarts/core';
+import { CandlestickChart, BarChart, LineChart } from 'echarts/charts';
+import { GridComponent, TooltipComponent, DataZoomComponent, VisualMapComponent, MarkLineComponent, LegendComponent } from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
+echarts.use([CandlestickChart, BarChart, LineChart, GridComponent, TooltipComponent, DataZoomComponent, VisualMapComponent, MarkLineComponent, LegendComponent, CanvasRenderer]);
 
 // API 基址：跟随页面挂载点（子路径部署如 /forecast/ 时自动适配）
 const API_BASE = new URL('./api/', document.baseURI).href;
@@ -541,6 +546,27 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
         </h2>
         <p class="page-desc">三层评分与历史预测对账</p>
 
+        <!-- K 线图 -->
+        <a-card size="small" style="margin-bottom:16px">
+          <template #title>
+            <span style="font-size:15px;font-weight:600">K 线图</span>
+            <span style="margin-left:12px;font-size:12px;color:rgba(0,0,0,.45);font-weight:400">
+              {{ klineFqLabel || '前复权' }} · {{ klineDays }} 日
+            </span>
+            <a-radio-group v-model:value="klineDays" size="small" style="float:right">
+              <a-radio-button :value="60">60日</a-radio-button>
+              <a-radio-button :value="120">120日</a-radio-button>
+              <a-radio-button :value="250">250日</a-radio-button>
+            </a-radio-group>
+          </template>
+          <a-spin :spinning="klineLoading">
+            <div ref="klineRef" style="width:100%;height:420px"></div>
+            <div v-if="!klineLoading && !klineRows.length" style="text-align:center;padding:24px;color:rgba(0,0,0,.35)">
+              K 线数据暂不可用
+            </div>
+          </a-spin>
+        </a-card>
+
         <a-descriptions bordered size="small" :column="4" v-if="latest.run_id">
           <a-descriptions-item label="最近预测">
             <a-tag :color="dirTag(latest.direction)">{{ latest.direction }}</a-tag>
@@ -583,6 +609,13 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
       </div>`,
     setup(props) {
       const stock = ref({}); const latest = ref({});
+      const klineRef = ref(null);
+      const klineDays = ref(120);
+      const klineLoading = ref(true);
+      const klineRows = ref([]);
+      const klineFqLabel = ref('');
+      let klineChart = null;
+
       const histCols = [
         { title: '期号', key: 'run' },
         { title: '生成时间', dataIndex: 'generated_at', key: 'time' },
@@ -594,13 +627,128 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
         { title: '实际涨跌', key: 'result' },
         { title: '命中', key: 'hit' },
       ];
+
+      // K 线渲染
+      function renderKline(rows) {
+        if (!klineRef.value || !rows.length) return;
+        if (klineChart) klineChart.dispose();
+        klineChart = echarts.init(klineRef.value);
+
+        const dates = rows.map(r => r.date);
+        const ohlc = rows.map(r => [r.open, r.close, r.low, r.high]); // ECharts: [open, close, low, high]
+        const volumes = rows.map(r => r.volume || 0);
+        const closes = rows.map(r => r.close);
+
+        // MA 计算
+        const ma = (n) => {
+          const out = [];
+          for (let i = 0; i < closes.length; i++) {
+            if (i < n - 1) { out.push(null); continue; }
+            let s = 0;
+            for (let j = i - n + 1; j <= i; j++) s += closes[j];
+            out.push(+(s / n).toFixed(2));
+          }
+          return out;
+        };
+
+        // 成交量颜色跟蜡烛涨跌一致
+        const volColors = rows.map(r => r.close >= r.open ? '#ef232a' : '#14b143');
+
+        const upColor = '#ef232a';   // 涨红
+        const downColor = '#14b143'; // 跌绿
+
+        klineChart.setOption({
+          animation: false,
+          tooltip: {
+            trigger: 'axis',
+            axisPointer: { type: 'cross' },
+            backgroundColor: 'rgba(255,255,255,0.96)',
+            borderColor: '#e8e8e8',
+            textStyle: { color: 'rgba(0,0,0,.85)', fontSize: 12 },
+            formatter: (params) => {
+              const k = params.find(p => p.seriesName === 'K线');
+              if (!k) return '';
+              const d = k.data;
+              return `<b>${k.axisValue}</b><br/>
+                开 <span style="color:${d[1] >= d[0] ? upColor : downColor}">${d[0]}</span>
+                收 <span style="color:${d[1] >= d[0] ? upColor : downColor}">${d[1]}</span><br/>
+                低 ${d[2]}　高 ${d[3]}<br/>
+                成交量 ${params.find(p => p.seriesName === '成交量')?.data ?? '—'}`;
+            },
+          },
+          axisPointer: { link: [{ xAxisIndex: 'all' }] },
+          grid: [
+            { left: 60, right: 20, top: 10, height: '58%' },
+            { left: 60, right: 20, top: '72%', height: '18%' },
+          ],
+          xAxis: [
+            { type: 'category', data: dates, gridIndex: 0, axisLine: { lineStyle: { color: '#e0e0e0' } }, axisLabel: { color: 'rgba(0,0,0,.45)', fontSize: 11 }, splitLine: { show: false } },
+            { type: 'category', data: dates, gridIndex: 1, axisLabel: { show: false }, axisTick: { show: false }, axisLine: { lineStyle: { color: '#e0e0e0' } } },
+          ],
+          yAxis: [
+            { scale: true, gridIndex: 0, splitLine: { lineStyle: { color: '#f5f5f5' } }, axisLabel: { color: 'rgba(0,0,0,.45)', fontSize: 11 } },
+            { scale: true, gridIndex: 1, splitNumber: 2, axisLabel: { color: 'rgba(0,0,0,.35)', fontSize: 10, formatter: (v) => v >= 1e8 ? (v/1e8).toFixed(1)+'亿' : v >= 1e4 ? (v/1e4).toFixed(0)+'万' : v }, splitLine: { show: false } },
+          ],
+          dataZoom: [
+            { type: 'inside', xAxisIndex: [0, 1], start: 40, end: 100 },
+            { type: 'slider', xAxisIndex: [0, 1], bottom: 4, height: 16, borderColor: '#e0e0e0', fillerColor: 'rgba(22,119,255,.08)' },
+          ],
+          series: [
+            {
+              name: 'K线', type: 'candlestick', data: ohlc, xAxisIndex: 0, yAxisIndex: 0,
+              itemStyle: { color: upColor, color0: downColor, borderColor: upColor, borderColor0: downColor },
+            },
+            { name: 'MA5', type: 'line', data: ma(5), xAxisIndex: 0, yAxisIndex: 0, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#1677ff' } },
+            { name: 'MA10', type: 'line', data: ma(10), xAxisIndex: 0, yAxisIndex: 0, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#faad14' } },
+            { name: 'MA20', type: 'line', data: ma(20), xAxisIndex: 0, yAxisIndex: 0, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#722ed1' } },
+            {
+              name: '成交量', type: 'bar', data: volumes, xAxisIndex: 1, yAxisIndex: 1,
+              itemStyle: { color: (p) => volColors[p.dataIndex] },
+            },
+          ],
+        });
+
+        const onResize = () => klineChart && klineChart.resize();
+        window.addEventListener('resize', onResize);
+        klineRef.value._onResize = onResize;
+      }
+
+      async function loadKline() {
+        klineLoading.value = true;
+        try {
+          const d = await api.get(apiUrl(`stock/${props.params.market}/${props.params.code}/klines?days=${klineDays.value}`));
+          klineRows.value = d.rows || [];
+          klineFqLabel.value = d.fq_label || '';
+          await nextTick();
+          renderKline(klineRows.value);
+        } catch (e) {
+          console.error('K线加载失败:', e);
+          klineRows.value = [];
+          klineFqLabel.value = '';
+        }
+        klineLoading.value = false;
+      }
+
+      watch(klineDays, () => loadKline());
+
       onMounted(async () => {
         try {
           stock.value = await api.get(apiUrl(`stock/${props.params.market}/${props.params.code}`));
           latest.value = stock.value.latest || {};
         } catch (e) { console.error(e); }
+        loadKline();
       });
-      return { stock, latest, histCols, fmt, fmtPct, dirTag, confTag, go: (h) => window.location.hash = h };
+
+      onBeforeUnmount(() => {
+        if (klineChart) klineChart.dispose();
+        if (klineRef.value?._onResize) window.removeEventListener('resize', klineRef.value._onResize);
+      });
+
+      return {
+        stock, latest, histCols, fmt, fmtPct, dirTag, confTag,
+        klineRef, klineDays, klineLoading, klineRows, klineFqLabel,
+        go: (h) => window.location.hash = h,
+      };
     },
   };
 
