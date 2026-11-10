@@ -52,7 +52,7 @@ SF_URL_PREFIX= ./venv/bin/python webapp.py
 │    docker compose exec web python run_pipeline.py       │
 │      ① 热股池   东财人气 + 同花顺热股 + 港股代理          │
 │      ② 行情     腾讯批量快照（价/PE/PB）                  │
-│      ③ 明细     K线(前复权250根) + 东财F10财务            │
+│      ③ 明细     K线(前复权分析+后复权落库) + 东财F10财务  │
 │      ④ 消息面   东财7x24 + 关键词情绪分                   │
 │      ⑤ 大盘     指数趋势+广度+情绪 → 规则/LLM 研判        │
 │      ⑥ 回测     往期预测 vs 当前价 → 命中率回填           │
@@ -88,6 +88,7 @@ Zstock/
 ├── templates/              # Jinja2 页面模板
 ├── deploy/
 │   ├── install-docker.sh           # Docker 一键部署
+│   ├── backfill_klines.py          # K 线历史回补（后复权，量化底座）
 │   ├── migrate_sqlite_to_mysql.py  # SQLite → MySQL 迁移
 │   ├── mysql-tuning.cnf            # MySQL 低内存调优
 │   └── nginx-forecast.conf         # 反代片段
@@ -127,6 +128,18 @@ docker compose exec -T mysql sh -c 'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWOR
 | `quotes_snap` | 行情快照（价/PE/PB/均线/RSI） |
 | `pool_items` | 热股池（来源、排名、抓取时间） |
 | `news_items` | 消息面快讯 |
+| `klines` | 日线历史（**后复权** OHLCV，量化回测底座，逐日积累） |
+
+**K 线历史（量化底座）**：`klines` 表按 `code+market+date` 幂等积累全量日线，口径为**后复权（hfq）**——后复权历史值不随新增除权事件变动，适合长期落库；（前复权会在每次除权后整体重算，落库会产生新旧口径混杂，故不存前复权）。每日 pipeline 自动增量落库（每只标的 250 根滚动窗口），存量历史用回补脚本一次挖齐：
+
+```bash
+# 回补 pool_items 出现过的全部标的（默认 2020-01-01 起，幂等可重复执行）
+docker compose exec web python deploy/backfill_klines.py
+
+# 指定标的/起始日/冒烟测试
+docker compose exec web python deploy/backfill_klines.py --codes 600519.SH,00700.HK --since 2023-01-01
+docker compose exec web python deploy/backfill_klines.py --list    # 查看覆盖情况
+```
 
 **本地开发（SQLite）**：未设 `DB_HOST` 时用 `data/forecast.db`，结构一致。
 

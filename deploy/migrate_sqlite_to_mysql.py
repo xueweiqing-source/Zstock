@@ -86,7 +86,8 @@ def main():
     src = sqlite3.connect(str(sqlite_path))
     src.row_factory = sqlite3.Row
 
-    tables = ["runs", "reports", "pool_items", "predictions", "quotes_snap", "news_items"]
+    tables = ["runs", "reports", "pool_items", "predictions", "quotes_snap", "news_items",
+              "klines"]
     # reports 表可能旧库没有
     existing = {r[0] for r in src.execute(
         "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}

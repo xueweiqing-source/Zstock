@@ -2,6 +2,16 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 思路记录变更。
 
+## [1.3.0] - 2026-11-10
+
+### 新增（量化底座：K 线历史落库）
+- **`klines` 表**：按 `code+market+date` 幂等积累日线 OHLCV（MySQL/SQLite 双 schema），口径统一**后复权（hfq）**——后复权历史值不随新增除权事件变动，避免前复权"每次除权全量重算"导致的新旧口径混杂
+- **每日增量落库**：pipeline 抓 K 线时同步以后复权重取一份入 `klines`（分析路径保持前复权不变，行为零变化）；落库失败仅告警不阻断主流程
+- **`deploy/backfill_klines.py` 历史回补**：以 `end` 为游标向前翻页（实测腾讯 A 股 fqkline 认 start/end 区间、港股 hkfqkline 只认 end+count，统一 end 翻页两市通用；单次上限 640 根），支持 `--since/--codes/--market/--limit/--list`，幂等可重复执行
+- `db.py` 新增 `upsert_klines` / `get_klines` / `kline_coverage`（覆盖体检）
+- `scrapers.py` `fetch_kline` 支持 `fq`（qfq/hfq/''）与 `start/end` 参数，默认行为不变
+- `migrate_sqlite_to_mysql.py` 表清单补上 `klines`（迁移不丢历史）
+
 ## [1.2.0] - 2026-10-27
 
 ### 变更

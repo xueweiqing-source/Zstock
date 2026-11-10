@@ -98,6 +98,13 @@ def run() -> dict:
         except Exception as e:  # noqa: BLE001
             log.warning("K线失败 %s.%s: %s", mkt, code, e)
             klines = []
+        # 量化底座：后复权日线落库（历史值不随除权变动，逐日积累供回测）
+        try:
+            rows_hfq = S.fetch_kline(mkt, code, C.KLINE_DAYS, fq="hfq")
+            if rows_hfq:
+                D.upsert_klines(code, mkt, rows_hfq, fq_type="hfq")
+        except Exception as e:  # noqa: BLE001
+            log.warning("K线落库失败 %s.%s: %s", mkt, code, e)
         try:
             fund = S.fetch_fundamentals(mkt, code)
         except Exception as e:  # noqa: BLE001

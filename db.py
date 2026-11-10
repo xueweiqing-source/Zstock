@@ -174,6 +174,21 @@ CREATE TABLE IF NOT EXISTS news_items (
     source      VARCHAR(64),
     KEY idx_news_run (run_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS klines (
+    code        VARCHAR(16)  NOT NULL,
+    market      VARCHAR(8)   NOT NULL,
+    `date`      VARCHAR(16)  NOT NULL,
+    open        DOUBLE,
+    high        DOUBLE,
+    low         DOUBLE,
+    close       DOUBLE,
+    volume      DOUBLE,
+    fq_type     VARCHAR(8)   NOT NULL DEFAULT 'hfq',
+    updated_at  VARCHAR(32),
+    PRIMARY KEY (code, market, `date`),
+    KEY idx_klines_date (`date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
 SCHEMA_SQLITE = """
@@ -255,6 +270,19 @@ CREATE TABLE IF NOT EXISTS news_items (
     summary     TEXT,
     url         TEXT,
     source      TEXT
+);
+CREATE TABLE IF NOT EXISTS klines (
+    code        TEXT NOT NULL,
+    market      TEXT NOT NULL,
+    date        TEXT NOT NULL,
+    open        REAL,
+    high        REAL,
+    low         REAL,
+    close       REAL,
+    volume      REAL,
+    fq_type     TEXT NOT NULL DEFAULT 'hfq',
+    updated_at  TEXT,
+    PRIMARY KEY (code, market, date)
 );
 CREATE INDEX IF NOT EXISTS idx_pred_code ON predictions(code, market);
 CREATE INDEX IF NOT EXISTS idx_pred_run ON predictions(run_id);
@@ -423,6 +451,40 @@ def save_run(result: Dict[str, Any]) -> None:
                  (n.get("summary") or "")[:2000], n.get("url"), n.get("source")))
 
 
+def upsert_klines(code: str, market: str, rows: List[Dict[str, Any]],
+                  fq_type: str = "hfq") -> int:
+    """批量写入日线 K 线（按 code+market+date 幂等覆盖），返回写入行数。
+
+    口径约定：量化回测统一使用 fq_type='hfq'（后复权）——后复权历史值不随新增
+    除权事件变动，适合长期积累；前复权值会在每次除权后整体重算，落库会产生
+    新旧口径混杂。rows 为 fetch_kline 返回结构 [{date, open, close, high, low, volume}]。
+    """
+    if not rows:
+        return 0
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    params = [(
+        code, market, r["date"], r.get("open"), r.get("high"), r.get("low"),
+        r.get("close"), r.get("volume"), fq_type, now,
+    ) for r in rows if r.get("date")]
+    if not params:
+        return 0
+    with get_conn() as conn:
+        cur = conn.cursor()
+        if USE_MYSQL:
+            cur.executemany(_q("""INSERT INTO klines
+                (code, market, `date`, open, high, low, close, volume, fq_type, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+                ON DUPLICATE KEY UPDATE
+                    open=VALUES(open), high=VALUES(high), low=VALUES(low),
+                    close=VALUES(close), volume=VALUES(volume),
+                    fq_type=VALUES(fq_type), updated_at=VALUES(updated_at)"""), params)
+        else:
+            cur.executemany("""INSERT OR REPLACE INTO klines
+                (code, market, date, open, high, low, close, volume, fq_type, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""", params)
+    return len(params)
+
+
 # ============================================================
 # 查询
 # ============================================================
@@ -529,3 +591,38 @@ def backtest_summary() -> Dict[str, Any]:
             "by_confidence": by_conf,
             "by_market": by_mkt,
         }
+
+
+# ============================================================
+# K 线历史（量化底座）
+# ============================================================
+
+def get_klines(code: str, market: str, start: str = "", end: str = "",
+               limit: int = 0) -> List[Dict]:
+    """取单只标的日线，按日期升序。start/end 为 'YYYY-MM-DD'（含端点），limit=0 不限行数"""
+    sql = "SELECT `date`, open, high, low, close, volume, fq_type FROM klines WHERE code=? AND market=?"
+    params: List[Any] = [code, market]
+    if start:
+        sql += " AND `date`>=?"
+        params.append(start)
+    if end:
+        sql += " AND `date`<=?"
+        params.append(end)
+    sql += " ORDER BY `date` ASC"
+    if limit:
+        sql += " LIMIT ?"
+        params.append(limit)
+    with get_conn() as conn:
+        cur = _exec(conn, sql, tuple(params))
+        return _rows(cur)
+
+
+def kline_coverage() -> List[Dict]:
+    """各标的 K 线覆盖情况（date/行数），供回补进度与体检使用"""
+    with get_conn() as conn:
+        cur = _exec(conn, """
+            SELECT code, market, MIN(`date`) AS min_date, MAX(`date`) AS max_date,
+                   COUNT(*) AS bars, MAX(updated_at) AS last_write
+            FROM klines GROUP BY code, market
+            ORDER BY market, code""")
+        return _rows(cur)

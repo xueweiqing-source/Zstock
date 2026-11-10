@@ -344,30 +344,27 @@ def fetch_quotes_batch(pairs: List[tuple]) -> Dict[str, dict]:
 # 3. K 线
 # ============================================================
 
-def fetch_kline(market: str, code: str, days: int = C.KLINE_DAYS) -> List[dict]:
-    """日线（前复权）。返回 [{date, open, close, high, low, volume}, ...] 升序"""
+def fetch_kline(market: str, code: str, days: int = C.KLINE_DAYS,
+                fq: str = "qfq", start: str = "", end: str = "") -> List[dict]:
+    """日线 K 线。返回 [{date, open, close, high, low, volume}, ...] 升序。
+
+    fq: 'qfq'=前复权（默认，当期分析用）/ 'hfq'=后复权（落库用，历史值稳定）
+        / ''=不复权。start/end 为 'YYYY-MM-DD'，给出后按区间抓取（历史回补用），
+        days 为返回根数上限。
+    """
+    fq_key = f"{fq}day" if fq else "day"
     if market == "HK":
         symbol = f"hk{code}"
-        url = (
-            "https://web.ifzq.gtimg.cn/appstock/app/hkfqkline/get"
-            f"?param={symbol},day,,,{days},qfq"
-        )
-        data = _get(url)
-        if not isinstance(data, dict):
-            return []
-        node = (data.get("data") or {}).get(symbol) or {}
-        rows = node.get("qfqday") or node.get("day") or []
+        base = "https://web.ifzq.gtimg.cn/appstock/app/hkfqkline/get"
     else:
         symbol = _to_tencent_symbol(market, code)
-        url = (
-            "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
-            f"?param={symbol},day,,,{days},qfq"
-        )
-        data = _get(url)
-        if not isinstance(data, dict):
-            return []
-        node = (data.get("data") or {}).get(symbol) or {}
-        rows = node.get("qfqday") or node.get("day") or []
+        base = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+    url = f"{base}?param={symbol},day,{start},{end},{days},{fq}"
+    data = _get(url)
+    if not isinstance(data, dict):
+        return []
+    node = (data.get("data") or {}).get(symbol) or {}
+    rows = node.get(fq_key) or node.get("day") or node.get("qfqday") or []
 
     out = []
     for r in rows:
