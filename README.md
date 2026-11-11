@@ -15,7 +15,7 @@
 | **回测对账** | 预测结果落库，下次运行自动回填实际涨跌与命中率（按方向 / 置信度 / 市场统计） |
 | **规则配置** | 43 项阈值可视化可调，Web 保存即生效（历史报告不变） |
 | **LLM 研判** | 可插拔（OpenAI 兼容：DeepSeek / Mimo 等），未配置自动降级为规则叙事 |
-| **Web 平台** | 总览 / 报告中心 / 个股工作台 / 回测与准确率 / 规则与研判 |
+| **Web 平台** | 总览 / 报告中心 / 个股工作台（K 线四面板：蜡烛+量+MACD+RSI）/ 回测与准确率（含策略绩效）/ 规则与研判 |
 
 ## 快速开始
 
@@ -78,7 +78,8 @@ Zstock/
 ├── docker-compose.yml      # web + mysql 编排（低内存调优）
 ├── config.py               # 配置：路径/鉴权/抓取参数/43 项规则默认值/凭据校验
 ├── scrapers.py             # 热股池、行情、K线、财务、消息面、指数广度
-├── indicators.py           # MA / MACD / RSI / KDJ
+├── indicators.py           # MA / MACD / RSI / KDJ（标量 + 序列版）
+├── backtest.py             # 策略回测器（纯 Python）：资金曲线/回撤/胜率/夏普 + CLI
 ├── analysis.py             # 三层打分 + 交叉验证 + 大盘预测 + 消息情绪
 ├── llm.py                  # LLM 研判（OpenAI 兼容，可降级）
 ├── db.py                   # 数据层：MySQL（生产）/ SQLite（本地兜底）
@@ -140,6 +141,36 @@ docker compose exec web python deploy/backfill_klines.py
 docker compose exec web python deploy/backfill_klines.py --codes 600519.SH,00700.HK --since 2023-01-01
 docker compose exec web python deploy/backfill_klines.py --list    # 查看覆盖情况
 ```
+
+**策略回测**：`backtest.py` 把 K 线 + 持仓序列跑成绩效报告（纯 Python，无额外依赖）。执行口径防未来函数——t 日收盘信号、**t+1 日开盘**成交，佣金双边 + 卖出印花税 + 滑点可调：
+
+```bash
+# 双均线策略（内置 ma / rsi / pred 三种）
+docker compose exec web python backtest.py --code 600519.SH --strategy ma --fast 5 --slow 20
+
+# 三层预测跟随：持有最近一次"看涨"预测（次日起生效），直接检验预测框架赚不赚钱
+docker compose exec web python backtest.py --code 600519.SH --strategy pred
+
+# 全池批量回测：等权组合 + 分标的超额 + 分方向前瞻收益（需 predictions 数据积累）
+docker compose exec web python backtest.py --pool
+
+# 风控与加权：--stop-loss 8 = 入场价下方 8% 止损（止损后信号转空前不再入场）
+# --weighted = 附带置信度加权组合（看涨标的按 高/中/低 加权，日频调仓含费用）
+docker compose exec web python backtest.py --pool --weighted --stop-loss 8
+
+# Web「回测与准确率」页同样提供：全池一键回测（资金曲线对比图）+ 单标的策略回测表单
+
+# 每周策略绩效体检：含置信度加权，JSON 存档 data/checks/ + 单行健康摘要
+docker compose exec web python deploy/weekly_check.py --stop-loss 8
+# cron（每周一 08:00）：
+# 0 8 * * 1 cd /var/www/stock-forecast && docker compose exec -T web python deploy/weekly_check.py >> /var/log/pool-check.log 2>&1
+
+# 输出：累计/年化收益、最大回撤、夏普、胜率、盈亏比、买入持有基准对比、交易明细
+# --json 报告.json 另存完整报告（含资金曲线）；--since 限定区间
+```
+
+> 回测口径：全仓进出、只做多（A 股做空受限）；数据为**后复权**，收益跨除权日正确。
+> 任何回测结果不代表未来表现——热股池本身是"热度榜"，存在选择偏差。
 
 **本地开发（SQLite）**：未设 `DB_HOST` 时用 `data/forecast.db`，结构一致。
 

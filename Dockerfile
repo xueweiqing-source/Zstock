@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 代码
 COPY config.py scrapers.py indicators.py analysis.py llm.py \
-     db.py report_gen.py webapp.py run_pipeline.py ./
+     db.py report_gen.py webapp.py run_pipeline.py backtest.py ./
 COPY templates/ ./templates/
 COPY static/ ./static/
 COPY deploy/ ./deploy/

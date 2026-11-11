@@ -66,20 +66,63 @@ def rsi(values: List[float], period: int = 14) -> Optional[float]:
     return 100.0 - 100.0 / (1.0 + rs)
 
 
-def kdj(klines: List[dict], n: int = 9, m1: int = 3, m2: int = 3):
-    """返回 (K, D, J)，国内常用 RSV→SMA 平滑口径"""
-    if len(klines) < n:
-        return None, None, None
+def rsi_series(values: List[float], period: int = 14) -> List[Optional[float]]:
+    """RSI 序列（简单平均/Cutler 口径，与 rsi() 逐位一致：rsi_series(v,p)[-1] == rsi(v,p)）。
+
+    返回与 values 等长；下标 < period 处为 None（样本不足）。
+    注：与 ta-lib 的 Wilder 平滑口径数值不同，项目内统一用本口径，保证
+    分析打分（rsi）与回测信号（rsi_series）可比。
+    """
+    n = len(values)
+    out: List[Optional[float]] = [None] * n
+    if n < period + 1:
+        return out
+    diffs = [values[i] - values[i - 1] for i in range(1, n)]   # diffs[j] 对应 values[j+1]-values[j]
+    for i in range(period, n):
+        gains, losses = 0.0, 0.0
+        for j in range(i - period, i):
+            d = diffs[j]
+            if d >= 0:
+                gains += d
+            else:
+                losses -= d
+        if losses == 0:
+            out[i] = 100.0
+        else:
+            out[i] = 100.0 - 100.0 / (1.0 + gains / losses)
+    return out
+
+
+def kdj_series(klines: List[dict], n: int = 9, m1: int = 3, m2: int = 3):
+    """KDJ 序列版，国内常用 RSV→SMA 平滑口径。
+
+    返回 (k_list, d_list, j_list)，与 klines 等长；下标 < n-1 处为 None。
+    """
+    length = len(klines)
+    ks: List[Optional[float]] = [None] * length
+    ds: List[Optional[float]] = [None] * length
+    js: List[Optional[float]] = [None] * length
+    if length < n:
+        return ks, ds, js
     k, d = 50.0, 50.0
-    for i in range(n - 1, len(klines)):
+    for i in range(n - 1, length):
         window = klines[i - n + 1:i + 1]
         hh = max(x["high"] for x in window)
         ll = min(x["low"] for x in window)
         rsv = (klines[i]["close"] - ll) / (hh - ll) * 100 if hh > ll else 50.0
         k = (m1 - 1) / m1 * k + 1 / m1 * rsv
         d = (m2 - 1) / m2 * d + 1 / m2 * k
-    j = 3 * k - 2 * d
-    return round(k, 2), round(d, 2), round(j, 2)
+        ks[i], ds[i] = k, d
+        js[i] = 3 * k - 2 * d
+    return ks, ds, js
+
+
+def kdj(klines: List[dict], n: int = 9, m1: int = 3, m2: int = 3):
+    """返回 (K, D, J) 最新值（委托 kdj_series，保证序列/标量口径一致）"""
+    ks, ds, js = kdj_series(klines, n, m1, m2)
+    if not ks or ks[-1] is None:
+        return None, None, None
+    return round(ks[-1], 2), round(ds[-1], 2), round(js[-1], 2)
 
 
 def compute_all(klines: List[dict]) -> Dict:
@@ -129,3 +172,36 @@ def compute_all(klines: List[dict]) -> Dict:
         out["chg_20d"] = round((closes[-1] / closes[-21] - 1) * 100, 2)
 
     return out
+
+
+def compute_series(klines: List[dict]) -> Dict[str, list]:
+    """序列版指标包：与 klines 等长的对齐序列（样本不足处置 None），供回测/因子研究。
+
+    键：date / open / high / low / close / volume / ma5 / ma20 / rsi14 /
+        dif / dea / hist / k / d / j。
+    与 compute_all 同口径：rsi 为简单平均（Cutler），KDJ 为 RSV→SMA 平滑，
+    MACD 为 EMA12/26 + DEA9。标量用途请继续用 compute_all。
+    """
+    if not klines:
+        return {}
+    n = len(klines)
+    closes = _closes(klines)
+    ks, ds, js = kdj_series(klines)
+    dif, dea, hist = macd(closes)
+
+    def _pad(seq: List[float]) -> List[Optional[float]]:
+        return [None] * (n - len(seq)) + list(seq)
+
+    return {
+        "date": [k["date"] for k in klines],
+        "open": [k["open"] for k in klines],
+        "high": [k["high"] for k in klines],
+        "low": [k["low"] for k in klines],
+        "close": closes,
+        "volume": [k.get("volume") for k in klines],
+        "ma5": ma_series(closes, 5),
+        "ma20": ma_series(closes, 20),
+        "rsi14": rsi_series(closes, 14),
+        "dif": _pad(dif), "dea": _pad(dea), "hist": _pad(hist),
+        "k": ks, "d": ds, "j": js,
+    }

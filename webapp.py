@@ -24,6 +24,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import config as C
 import db as D
 import scrapers as S
+import backtest as B
+import indicators as ind
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 C.validate_security()
@@ -314,9 +316,23 @@ def api_stock_klines(market: str, code: str):
             "high": r.get("high"),
             "volume": r.get("volume"),
         })
+
+    # 指标序列（可选）：与 rows 逐行对齐，口径同分析层（Cutler RSI / RSV→SMA KDJ）
+    if out and request.args.get("indicators", "0") in ("1", "true", "yes"):
+        ser = ind.compute_series(rows)
+        for i, o in enumerate(out):
+            o["rsi14"] = ser["rsi14"][i]
+            o["macd_dif"] = ser["dif"][i]
+            o["macd_dea"] = ser["dea"][i]
+            o["macd_hist"] = ser["hist"][i]
+            o["kdj_k"] = ser["k"][i]
+            o["kdj_d"] = ser["d"][i]
+            o["kdj_j"] = ser["j"][i]
+
     fq_label = {"qfq": "前复权", "hfq": "后复权", "": "不复权"}.get(fq_used, fq_used)
     return jsonify({"code": code, "market": market, "fq": fq_used,
-                    "fq_label": fq_label, "days": days, "rows": out})
+                    "fq_label": fq_label, "days": days,
+                    "indicators": bool(out and "rsi14" in out[0]), "rows": out})
 
 
 @app.route("/api/backtest")
@@ -324,6 +340,81 @@ def api_stock_klines(market: str, code: str):
 def api_backtest():
     D.init_db()
     return jsonify(D.backtest_summary())
+
+
+_pool_cache: dict = {}      # {since: (ts, report)} 全池回测结果 60s 缓存
+
+
+@app.route("/api/backtest/pool")
+@login_required
+def api_backtest_pool():
+    """全池预测跟随批量回测：等权组合 + 分方向前瞻 + 分标的（60s 内存缓存）"""
+    since = (request.args.get("since") or "").strip()
+    stop_loss = min(max(request.args.get("stop_loss", 0.0, type=float), 0.0), 50.0)
+    weighted = request.args.get("weighted", "1") in ("1", "true", "yes")
+    cache_key = f"{since}|{stop_loss}|{int(weighted)}"
+    now = time.time()
+    hit = _pool_cache.get(cache_key)
+    if hit and now - hit[0] < 60:
+        return jsonify(hit[1])
+    klines_map, preds_map = B.load_pool_from_db(since)
+    if not preds_map:
+        return jsonify({"error": "no_predictions",
+                        "message": "predictions 表暂无记录，先跑几期 pipeline"}), 404
+    rep = B.pred_pool_report(klines_map, preds_map, stop_loss_pct=stop_loss,
+                             include_weighted=weighted)
+    if not rep["meta"]["n_stocks"]:
+        return jsonify({"error": "no_data",
+                        "message": "无可回测标的（对应 klines 历史不足，先跑 deploy/backfill_klines.py）"}), 404
+    if len(_pool_cache) > 8:
+        _pool_cache.clear()
+    _pool_cache[cache_key] = (now, rep)
+    return jsonify(rep)
+
+
+@app.route("/api/backtest/stock/<market>/<code>")
+@login_required
+def api_backtest_stock(market: str, code: str):
+    """单标的策略回测（ma / rsi / pred）：绩效 + 交易明细 + 资金曲线"""
+    if market not in ("SH", "SZ", "HK") or not code.isalnum() or len(code) > 8:
+        return jsonify({"error": "bad_request"}), 400
+    strategy = (request.args.get("strategy") or "ma").lower()
+    if strategy not in ("ma", "rsi", "pred"):
+        return jsonify({"error": "bad_request", "message": "strategy 需为 ma/rsi/pred"}), 400
+    fast = min(max(request.args.get("fast", 5, type=int), 2), 250)
+    slow = min(max(request.args.get("slow", 20, type=int), 3), 250)
+    rsi_period = min(max(request.args.get("rsi_period", 14, type=int), 2), 100)
+    rsi_low = min(max(request.args.get("rsi_low", 30.0, type=float), 1.0), 49.0)
+    rsi_high = min(max(request.args.get("rsi_high", 70.0, type=float), 51.0), 99.0)
+    stop_loss = min(max(request.args.get("stop_loss", 0.0, type=float), 0.0), 50.0)
+    since = (request.args.get("since") or "").strip()
+
+    D.init_db()
+    klines = D.get_klines(code, market, start=since)
+    if len(klines) < 30:
+        return jsonify({"error": "no_data",
+                        "message": f"klines 仅 {len(klines)} 根，先跑 deploy/backfill_klines.py 回补"}), 404
+
+    if strategy == "ma":
+        positions = B.ma_cross_positions(klines, fast, slow)
+        label = f"ma_cross({fast},{slow})"
+    elif strategy == "rsi":
+        positions = B.rsi_positions(klines, rsi_period, rsi_low, rsi_high)
+        label = f"rsi({rsi_period},{rsi_low:g},{rsi_high:g})"
+    else:
+        with D.get_conn() as conn:
+            preds = D._rows(D._exec(conn, """
+                SELECT p.created_at, p.direction FROM predictions p
+                WHERE p.code=? AND p.market=? ORDER BY p.created_at""", (code, market)))
+        if not preds:
+            return jsonify({"error": "no_predictions",
+                            "message": "该标的无预测记录，pred 策略无信号"}), 404
+        positions = B.pred_positions(klines, preds)
+        label = f"pred_follow({len(preds)} 条预测)"
+
+    result = B.backtest(klines, positions, stop_loss_pct=stop_loss)
+    return jsonify({"code": code, "market": market, "strategy": strategy,
+                    "label": label, **result})
 
 
 @app.route("/api/indices")

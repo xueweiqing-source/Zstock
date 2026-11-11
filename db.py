@@ -599,7 +599,11 @@ def backtest_summary() -> Dict[str, Any]:
 
 def get_klines(code: str, market: str, start: str = "", end: str = "",
                limit: int = 0) -> List[Dict]:
-    """取单只标的日线，按日期升序。start/end 为 'YYYY-MM-DD'（含端点），limit=0 不限行数"""
+    """取单只标的日线，返回按日期升序。start/end 为 'YYYY-MM-DD'（含端点）。
+
+    limit>0 时取**最近** N 根再升序输出（K 线取数惯例是"最近 N 根"，
+    不是最早的 N 根）；limit=0 不限行数。
+    """
     sql = "SELECT `date`, open, high, low, close, volume, fq_type FROM klines WHERE code=? AND market=?"
     params: List[Any] = [code, market]
     if start:
@@ -608,13 +612,17 @@ def get_klines(code: str, market: str, start: str = "", end: str = "",
     if end:
         sql += " AND `date`<=?"
         params.append(end)
-    sql += " ORDER BY `date` ASC"
     if limit:
-        sql += " LIMIT ?"
+        sql += " ORDER BY `date` DESC LIMIT ?"
         params.append(limit)
+    else:
+        sql += " ORDER BY `date` ASC"
     with get_conn() as conn:
         cur = _exec(conn, sql, tuple(params))
-        return _rows(cur)
+        rows = _rows(cur)
+    if limit:
+        rows.reverse()          # DESC 取最近 N 根后转回升序输出
+    return rows
 
 
 def kline_coverage() -> List[Dict]:

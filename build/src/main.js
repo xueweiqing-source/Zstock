@@ -560,7 +560,7 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
             </a-radio-group>
           </template>
           <a-spin :spinning="klineLoading">
-            <div ref="klineRef" style="width:100%;height:420px"></div>
+            <div ref="klineRef" style="width:100%;height:580px"></div>
             <div v-if="!klineLoading && !klineRows.length" style="text-align:center;padding:24px;color:rgba(0,0,0,.35)">
               K 线数据暂不可用
             </div>
@@ -628,7 +628,7 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
         { title: '命中', key: 'hit' },
       ];
 
-      // K 线渲染
+      // K 线渲染（K线 + 成交量 + MACD + RSI 四面板）
       function renderKline(rows) {
         if (!klineRef.value || !rows.length) return;
         if (klineChart) klineChart.dispose();
@@ -638,6 +638,11 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
         const ohlc = rows.map(r => [r.open, r.close, r.low, r.high]); // ECharts: [open, close, low, high]
         const volumes = rows.map(r => r.volume || 0);
         const closes = rows.map(r => r.close);
+        const hasInd = 'rsi14' in rows[0];
+        const rsis = hasInd ? rows.map(r => r.rsi14) : [];
+        const difs = hasInd ? rows.map(r => r.macd_dif) : [];
+        const deas = hasInd ? rows.map(r => r.macd_dea) : [];
+        const hists = hasInd ? rows.map(r => r.macd_hist) : [];
 
         // MA 计算
         const ma = (n) => {
@@ -657,6 +662,38 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
         const upColor = '#ef232a';   // 涨红
         const downColor = '#14b143'; // 跌绿
 
+        const series = [
+          {
+            name: 'K线', type: 'candlestick', data: ohlc, xAxisIndex: 0, yAxisIndex: 0,
+            itemStyle: { color: upColor, color0: downColor, borderColor: upColor, borderColor0: downColor },
+          },
+          { name: 'MA5', type: 'line', data: ma(5), xAxisIndex: 0, yAxisIndex: 0, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#1677ff' } },
+          { name: 'MA10', type: 'line', data: ma(10), xAxisIndex: 0, yAxisIndex: 0, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#faad14' } },
+          { name: 'MA20', type: 'line', data: ma(20), xAxisIndex: 0, yAxisIndex: 0, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#722ed1' } },
+          {
+            name: '成交量', type: 'bar', data: volumes, xAxisIndex: 1, yAxisIndex: 1,
+            itemStyle: { color: (p) => volColors[p.dataIndex] },
+          },
+        ];
+        if (hasInd) {
+          series.push(
+            {
+              name: 'MACD柱', type: 'bar', data: hists, xAxisIndex: 2, yAxisIndex: 2,
+              itemStyle: { color: (p) => (p.data ?? 0) >= 0 ? upColor : downColor },
+            },
+            { name: 'DIF', type: 'line', data: difs, xAxisIndex: 2, yAxisIndex: 2, showSymbol: false, lineStyle: { width: 1, color: '#1677ff' } },
+            { name: 'DEA', type: 'line', data: deas, xAxisIndex: 2, yAxisIndex: 2, showSymbol: false, lineStyle: { width: 1, color: '#faad14' } },
+            {
+              name: 'RSI', type: 'line', data: rsis, xAxisIndex: 3, yAxisIndex: 3, showSymbol: false,
+              lineStyle: { width: 1.2, color: '#fa8c16' },
+              markLine: {
+                silent: true, symbol: 'none', lineStyle: { type: 'dashed', color: '#bfbfbf' },
+                label: { show: false }, data: [{ yAxis: 70 }, { yAxis: 30 }],
+              },
+            },
+          );
+        }
+
         klineChart.setOption({
           animation: false,
           tooltip: {
@@ -669,43 +706,41 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
               const k = params.find(p => p.seriesName === 'K线');
               if (!k) return '';
               const d = k.data;
+              const find = (n) => params.find(p => p.seriesName === n)?.data;
+              const indLine = hasInd
+                ? `<br/>RSI ${find('RSI') ?? '—'}　DIF ${find('DIF') ?? '—'}　DEA ${find('DEA') ?? '—'}`
+                : '';
               return `<b>${k.axisValue}</b><br/>
                 开 <span style="color:${d[1] >= d[0] ? upColor : downColor}">${d[0]}</span>
                 收 <span style="color:${d[1] >= d[0] ? upColor : downColor}">${d[1]}</span><br/>
                 低 ${d[2]}　高 ${d[3]}<br/>
-                成交量 ${params.find(p => p.seriesName === '成交量')?.data ?? '—'}`;
+                成交量 ${find('成交量') ?? '—'}${indLine}`;
             },
           },
           axisPointer: { link: [{ xAxisIndex: 'all' }] },
           grid: [
-            { left: 60, right: 20, top: 10, height: '58%' },
-            { left: 60, right: 20, top: '72%', height: '18%' },
+            { left: 60, right: 20, top: 10, height: '42%' },
+            { left: 60, right: 20, top: '50%', height: '11%' },
+            { left: 60, right: 20, top: '64%', height: '13%' },
+            { left: 60, right: 20, top: '80%', height: '13%' },
           ],
           xAxis: [
-            { type: 'category', data: dates, gridIndex: 0, axisLine: { lineStyle: { color: '#e0e0e0' } }, axisLabel: { color: 'rgba(0,0,0,.45)', fontSize: 11 }, splitLine: { show: false } },
+            { type: 'category', data: dates, gridIndex: 0, axisLabel: { show: false }, axisTick: { show: false }, axisLine: { lineStyle: { color: '#e0e0e0' } }, splitLine: { show: false } },
             { type: 'category', data: dates, gridIndex: 1, axisLabel: { show: false }, axisTick: { show: false }, axisLine: { lineStyle: { color: '#e0e0e0' } } },
+            { type: 'category', data: dates, gridIndex: 2, axisLabel: { show: false }, axisTick: { show: false }, axisLine: { lineStyle: { color: '#e0e0e0' } } },
+            { type: 'category', data: dates, gridIndex: 3, axisLine: { lineStyle: { color: '#e0e0e0' } }, axisLabel: { color: 'rgba(0,0,0,.45)', fontSize: 11 }, splitLine: { show: false } },
           ],
           yAxis: [
             { scale: true, gridIndex: 0, splitLine: { lineStyle: { color: '#f5f5f5' } }, axisLabel: { color: 'rgba(0,0,0,.45)', fontSize: 11 } },
             { scale: true, gridIndex: 1, splitNumber: 2, axisLabel: { color: 'rgba(0,0,0,.35)', fontSize: 10, formatter: (v) => v >= 1e8 ? (v/1e8).toFixed(1)+'亿' : v >= 1e4 ? (v/1e4).toFixed(0)+'万' : v }, splitLine: { show: false } },
+            { scale: true, gridIndex: 2, splitNumber: 2, axisLabel: { color: 'rgba(0,0,0,.35)', fontSize: 10 }, splitLine: { show: false } },
+            { min: 0, max: 100, gridIndex: 3, splitNumber: 2, axisLabel: { color: 'rgba(0,0,0,.35)', fontSize: 10 }, splitLine: { show: false } },
           ],
           dataZoom: [
-            { type: 'inside', xAxisIndex: [0, 1], start: 40, end: 100 },
-            { type: 'slider', xAxisIndex: [0, 1], bottom: 4, height: 16, borderColor: '#e0e0e0', fillerColor: 'rgba(22,119,255,.08)' },
+            { type: 'inside', xAxisIndex: [0, 1, 2, 3], start: 40, end: 100 },
+            { type: 'slider', xAxisIndex: [0, 1, 2, 3], bottom: 4, height: 16, borderColor: '#e0e0e0', fillerColor: 'rgba(22,119,255,.08)' },
           ],
-          series: [
-            {
-              name: 'K线', type: 'candlestick', data: ohlc, xAxisIndex: 0, yAxisIndex: 0,
-              itemStyle: { color: upColor, color0: downColor, borderColor: upColor, borderColor0: downColor },
-            },
-            { name: 'MA5', type: 'line', data: ma(5), xAxisIndex: 0, yAxisIndex: 0, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#1677ff' } },
-            { name: 'MA10', type: 'line', data: ma(10), xAxisIndex: 0, yAxisIndex: 0, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#faad14' } },
-            { name: 'MA20', type: 'line', data: ma(20), xAxisIndex: 0, yAxisIndex: 0, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#722ed1' } },
-            {
-              name: '成交量', type: 'bar', data: volumes, xAxisIndex: 1, yAxisIndex: 1,
-              itemStyle: { color: (p) => volColors[p.dataIndex] },
-            },
-          ],
+          series,
         });
 
         const onResize = () => klineChart && klineChart.resize();
@@ -716,7 +751,7 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
       async function loadKline() {
         klineLoading.value = true;
         try {
-          const d = await api.get(apiUrl(`stock/${props.params.market}/${props.params.code}/klines?days=${klineDays.value}`));
+          const d = await api.get(apiUrl(`stock/${props.params.market}/${props.params.code}/klines?days=${klineDays.value}&indicators=1`));
           klineRows.value = d.rows || [];
           klineFqLabel.value = d.fq_label || '';
           await nextTick();
@@ -769,17 +804,163 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
           </div>
 
           <a-card title="按方向统计" size="small">
-            <a-table :dataSource="dirRows" :columns="statCols" rowKey="key" size="small" :pagination="false" />
+            <a-table :dataSource="dirRows" :columns="statCols" rowKey="key" size="small" :pagination="false">
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'rate'">{{ record.rate != null ? record.rate + '%' : '—' }}</template>
+                <template v-else-if="column.key === 'pct'">
+                  <span v-if="record.avg_pct != null" :style="{ color: record.avg_pct >= 0 ? '#cf1322' : '#389e0d' }">{{ fmtPct(record.avg_pct) }}</span>
+                  <span v-else>—</span>
+                </template>
+              </template>
+            </a-table>
           </a-card>
 
           <a-card title="按置信度统计" size="small" style="margin-top:12px">
-            <a-table :dataSource="confRows" :columns="statCols" rowKey="key" size="small" :pagination="false" />
+            <a-table :dataSource="confRows" :columns="statCols" rowKey="key" size="small" :pagination="false">
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'rate'">{{ record.rate != null ? record.rate + '%' : '—' }}</template>
+                <template v-else-if="column.key === 'pct'">
+                  <span v-if="record.avg_pct != null" :style="{ color: record.avg_pct >= 0 ? '#cf1322' : '#389e0d' }">{{ fmtPct(record.avg_pct) }}</span>
+                  <span v-else>—</span>
+                </template>
+              </template>
+            </a-table>
           </a-card>
 
           <a-card title="按市场统计" size="small" style="margin-top:12px">
-            <a-table :dataSource="mktRows" :columns="statCols" rowKey="key" size="small" :pagination="false" />
+            <a-table :dataSource="mktRows" :columns="statCols" rowKey="key" size="small" :pagination="false">
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'rate'">{{ record.rate != null ? record.rate + '%' : '—' }}</template>
+                <template v-else-if="column.key === 'pct'">
+                  <span v-if="record.avg_pct != null" :style="{ color: record.avg_pct >= 0 ? '#cf1322' : '#389e0d' }">{{ fmtPct(record.avg_pct) }}</span>
+                  <span v-else>—</span>
+                </template>
+              </template>
+            </a-table>
           </a-card>
         </a-spin>
+
+        <h2 class="page-title" style="margin-top:28px">策略绩效（量化回测）</h2>
+        <p class="page-desc">口径：t 日信号 → t+1 开盘成交，佣金万三 / 卖出印花税万五；全池为等权组合，基准=同池等权买入持有。历史绩效不代表未来表现。</p>
+        <a-alert v-if="btMsg.text" :type="btMsg.type" :message="btMsg.text" show-icon closable style="margin-bottom:12px" @close="btMsg.text=''" />
+
+        <a-card size="small">
+          <template #title>
+            <span style="font-size:15px;font-weight:600">全池预测跟随</span>
+            <span style="margin-left:12px;font-size:12px;color:rgba(0,0,0,.45);font-weight:400">等权组合 vs 买入持有</span>
+          </template>
+          <template #extra>
+            <a-input v-model:value="poolSince" placeholder="起始日 如 2023-01-01" size="small" style="width:150px" />
+            <a-input-number v-model:value="poolStop" :min="0" :max="50" size="small" style="width:82px;margin-left:8px" placeholder="止损%" />
+            <a-button type="primary" size="small" :loading="poolLoading" style="margin-left:8px" @click="runPool">生成全池回测</a-button>
+          </template>
+          <div v-if="pool">
+            <div class="stat-row">
+              <div class="stat-item"><div class="label">标的 / 预测</div><div class="value">{{ pool.meta.n_stocks }} / {{ pool.meta.n_preds }}</div></div>
+              <div class="stat-item"><div class="label">组合累计</div>
+                <div class="value" :class="pool.portfolio.stats.total_return_pct >= 0 ? 'pos' : 'neg'">{{ fmtPct(pool.portfolio.stats.total_return_pct) }}</div></div>
+              <div class="stat-item"><div class="label">买入持有基准</div>
+                <div class="value" :class="pool.portfolio.stats.buy_hold_pct >= 0 ? 'pos' : 'neg'">{{ fmtPct(pool.portfolio.stats.buy_hold_pct) }}</div></div>
+              <div class="stat-item"><div class="label">超额</div>
+                <div class="value" :class="pool.portfolio.stats.excess_pct >= 0 ? 'pos' : 'neg'">{{ fmtPct(pool.portfolio.stats.excess_pct) }}</div></div>
+              <div class="stat-item" v-if="pool.weighted"><div class="label">置信度加权</div>
+                <div class="value" :class="pool.weighted.stats.total_return_pct >= 0 ? 'pos' : 'neg'">{{ fmtPct(pool.weighted.stats.total_return_pct) }}</div></div>
+              <div class="stat-item"><div class="label">最大回撤</div><div class="value neg">{{ pool.portfolio.stats.max_drawdown_pct }}%</div></div>
+              <div class="stat-item"><div class="label">夏普</div><div class="value">{{ pool.portfolio.stats.sharpe != null ? pool.portfolio.stats.sharpe : '—' }}</div></div>
+            </div>
+            <div ref="poolChartRef" style="width:100%;height:280px"></div>
+
+            <a-card title="分方向前瞻收益（预测生效 → 次日/5日实际）" size="small" style="margin-top:8px">
+              <a-table :dataSource="dirFwdRows" :columns="dirFwdCols" rowKey="key" size="small" :pagination="false">
+                <template #bodyCell="{ column, record }">
+                  <template v-if="column.key === 'n1'">
+                    <span v-if="record.next1_avg_pct != null" :style="{ color: record.next1_avg_pct >= 0 ? '#cf1322' : '#389e0d' }">{{ fmtPct(record.next1_avg_pct) }}</span>
+                    <span v-else>—</span>
+                  </template>
+                  <template v-else-if="column.key === 'nw'">{{ record.next1_win_pct != null ? record.next1_win_pct + '%' : '—' }}</template>
+                  <template v-else-if="column.key === 'n5'">
+                    <span v-if="record.next5_avg_pct != null" :style="{ color: record.next5_avg_pct >= 0 ? '#cf1322' : '#389e0d' }">{{ fmtPct(record.next5_avg_pct) }}</span>
+                    <span v-else>—</span>
+                  </template>
+                </template>
+              </a-table>
+            </a-card>
+
+            <a-card title="分标的（按超额降序）" size="small" style="margin-top:8px">
+              <a-table :dataSource="poolRows" :columns="poolCols" rowKey="rowKey" size="small"
+                       :pagination="{ pageSize: 10 }" :scroll="{ x: 760 }">
+                <template #bodyCell="{ column, record }">
+                  <template v-if="column.key === 'pr'">
+                    <span :style="{ color: record.pred_return_pct >= 0 ? '#cf1322' : '#389e0d' }">{{ fmtPct(record.pred_return_pct) }}</span>
+                  </template>
+                  <template v-else-if="column.key === 'bh'">
+                    <span :style="{ color: record.buy_hold_pct >= 0 ? '#cf1322' : '#389e0d' }">{{ fmtPct(record.buy_hold_pct) }}</span>
+                  </template>
+                  <template v-else-if="column.key === 'ex'">
+                    <span :style="{ color: record.excess_pct >= 0 ? '#cf1322' : '#389e0d' }">{{ fmtPct(record.excess_pct) }}</span>
+                  </template>
+                  <template v-else-if="column.key === 'wr'">{{ record.win_rate != null ? record.win_rate + '%' : '—' }}</template>
+                </template>
+              </a-table>
+            </a-card>
+          </div>
+          <a-empty v-else-if="!poolLoading" description="点击「生成全池回测」（需 predictions 与 klines 数据积累）" />
+        </a-card>
+
+        <a-card title="单标的策略回测" size="small" style="margin-top:12px">
+          <a-form layout="inline" style="flex-wrap:wrap;gap:8px 0">
+            <a-form-item label="标的"><a-input v-model:value="sf.code" placeholder="600519.SH" style="width:130px" /></a-form-item>
+            <a-form-item label="策略">
+              <a-select v-model:value="sf.strategy" style="width:160px">
+                <a-select-option value="ma">双均线</a-select-option>
+                <a-select-option value="rsi">RSI 均值回归</a-select-option>
+                <a-select-option value="pred">三层预测跟随</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item v-if="sf.strategy==='ma'" label="快/慢线">
+              <a-input-number v-model:value="sf.fast" :min="2" :max="250" style="width:72px" />
+              <span style="margin:0 4px">/</span>
+              <a-input-number v-model:value="sf.slow" :min="3" :max="250" style="width:72px" />
+            </a-form-item>
+            <a-form-item v-if="sf.strategy==='rsi'" label="周期/低/高">
+              <a-input-number v-model:value="sf.rsiPeriod" :min="2" :max="100" style="width:66px" />
+              <a-input-number v-model:value="sf.rsiLow" :min="1" :max="49" style="width:66px" />
+              <a-input-number v-model:value="sf.rsiHigh" :min="51" :max="99" style="width:66px" />
+            </a-form-item>
+            <a-form-item label="止损%"><a-input-number v-model:value="sf.stopLoss" :min="0" :max="50" style="width:72px" /></a-form-item>
+            <a-form-item label="起始日"><a-input v-model:value="sf.since" placeholder="可空" style="width:110px" /></a-form-item>
+            <a-form-item><a-button type="primary" :loading="singleLoading" @click="runSingle">运行回测</a-button></a-form-item>
+          </a-form>
+          <div v-if="single" style="margin-top:12px">
+            <div class="stat-row">
+              <div class="stat-item"><div class="label">策略</div><div class="value" style="font-size:14px">{{ single.label }}</div></div>
+              <div class="stat-item"><div class="label">累计收益</div>
+                <div class="value" :class="single.stats.total_return_pct >= 0 ? 'pos' : 'neg'">{{ fmtPct(single.stats.total_return_pct) }}</div></div>
+              <div class="stat-item"><div class="label">买入持有</div>
+                <div class="value" :class="single.stats.buy_hold_pct >= 0 ? 'pos' : 'neg'">{{ fmtPct(single.stats.buy_hold_pct) }}</div></div>
+              <div class="stat-item"><div class="label">超额</div>
+                <div class="value" :class="single.stats.excess_pct >= 0 ? 'pos' : 'neg'">{{ fmtPct(single.stats.excess_pct) }}</div></div>
+              <div class="stat-item"><div class="label">最大回撤</div><div class="value neg">{{ single.stats.max_drawdown_pct }}%</div></div>
+              <div class="stat-item"><div class="label">夏普</div><div class="value">{{ single.stats.sharpe != null ? single.stats.sharpe : '—' }}</div></div>
+              <div class="stat-item"><div class="label">交易 / 胜率</div>
+                <div class="value">{{ single.stats.n_trades }} / {{ single.stats.win_rate_pct != null ? single.stats.win_rate_pct + '%' : '—' }}</div></div>
+            </div>
+            <div ref="singleChartRef" style="width:100%;height:240px"></div>
+            <a-table :dataSource="single.trades" :columns="tradeCols" rowKey="entry_date" size="small"
+                     :pagination="{ pageSize: 10 }" style="margin-top:8px">
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'ep'">{{ fmt(record.entry_price) }}</template>
+                <template v-else-if="column.key === 'xp'">{{ record.exit_price != null ? fmt(record.exit_price) : '—' }}</template>
+                <template v-else-if="column.key === 'xd'">{{ record.exit_date || '（持仓中）' }}</template>
+                <template v-else-if="column.key === 'rt'">
+                  <span :style="{ color: record.ret_pct >= 0 ? '#cf1322' : '#389e0d' }">{{ fmtPct(record.ret_pct) }}</span>
+                </template>
+                <template v-else-if="column.key === 'rs'">{{ ({ stop: '止损', signal: '信号', open: '持仓' })[record.reason] || '—' }}</template>
+              </template>
+            </a-table>
+          </div>
+          <a-empty v-else-if="!singleLoading" description="输入标的代码并运行（如 600519.SH）" />
+        </a-card>
       </div>`,
     setup() {
       const s = ref({ total: {}, by_direction: {}, by_confidence: {}, by_market: {} });
@@ -788,19 +969,210 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
         { title: '分类', dataIndex: 'key', key: 'key' },
         { title: '样本', dataIndex: 'n', key: 'n' },
         { title: '命中', dataIndex: 'hit', key: 'hit' },
-        { title: '命中率', dataIndex: 'rate', key: 'rate', render: (v) => v != null ? v + '%' : '—' },
-        { title: '平均实际涨跌', dataIndex: 'avg_pct', key: 'pct',
-          render: (v) => v != null ? `<span style="color:${v >= 0 ? '#cf1322' : '#389e0d'}">${fmtPct(v)}</span>` : '—' },
+        { title: '命中率', dataIndex: 'rate', key: 'rate' },
+        { title: '平均实际涨跌', dataIndex: 'avg_pct', key: 'pct' },
       ];
       const toRows = (obj) => Object.entries(obj || {}).map(([k, v]) => ({ key: k, ...v }));
       const dirRows = computed(() => toRows(s.value.by_direction));
       const confRows = computed(() => toRows(s.value.by_confidence));
       const mktRows = computed(() => toRows(s.value.by_market));
+
+      // ---------- 策略绩效：全池 ----------
+      const btMsg = reactive({ text: '', type: 'info' });
+      const pool = ref(null);
+      const poolLoading = ref(false);
+      const poolSince = ref('');
+      const poolStop = ref(0);
+      const poolChartRef = ref(null);
+      let poolChart = null;
+
+      const renderPoolChart = () => {
+        if (!poolChartRef.value || !pool.value?.portfolio) return;
+        if (poolChart) poolChart.dispose();
+        poolChart = echarts.init(poolChartRef.value);
+        const pc = pool.value.portfolio;
+        const init0 = pool.value.meta.init_cash;
+        const dates = pc.equity_curve.map(x => x[0]);
+        const strat = pc.equity_curve.map(x => +((x[1] / init0 - 1) * 100).toFixed(2));
+        const bench = pc.bench_curve.map(x => +((x[1] / init0 - 1) * 100).toFixed(2));
+        const legend = ['预测跟随(等权)', '等权买入持有'];
+        const series = [
+          { name: '预测跟随(等权)', type: 'line', data: strat, showSymbol: false, lineStyle: { width: 2, color: '#cf1322' } },
+          { name: '等权买入持有', type: 'line', data: bench, showSymbol: false, lineStyle: { width: 1.5, color: '#8c8c8c', type: 'dashed' } },
+        ];
+        const w = pool.value.weighted;
+        if (w?.equity_curve?.length) {
+          legend.push('置信度加权');
+          series.push({
+            name: '置信度加权', type: 'line', showSymbol: false,
+            data: w.equity_curve.map(x => +((x[1] / init0 - 1) * 100).toFixed(2)),
+            lineStyle: { width: 1.5, color: '#fa8c16' },
+          });
+        }
+        poolChart.setOption({
+          animation: false,
+          tooltip: {
+            trigger: 'axis', backgroundColor: 'rgba(255,255,255,0.96)', borderColor: '#e8e8e8',
+            textStyle: { color: 'rgba(0,0,0,.85)', fontSize: 12 },
+            valueFormatter: (v) => (v >= 0 ? '+' : '') + v + '%',
+          },
+          legend: { data: legend, top: 0 },
+          grid: { left: 60, right: 20, top: 32, bottom: 44 },
+          xAxis: {
+            type: 'category', data: dates,
+            axisLabel: { color: 'rgba(0,0,0,.45)', fontSize: 11 },
+            axisLine: { lineStyle: { color: '#e0e0e0' } }, splitLine: { show: false },
+          },
+          yAxis: {
+            type: 'value',
+            axisLabel: { color: 'rgba(0,0,0,.45)', fontSize: 11, formatter: '{value}%' },
+            splitLine: { lineStyle: { color: '#f5f5f5' } },
+          },
+          dataZoom: [
+            { type: 'inside' },
+            { type: 'slider', bottom: 4, height: 16, borderColor: '#e0e0e0', fillerColor: 'rgba(22,119,255,.08)' },
+          ],
+          series,
+        });
+        const onResize = () => poolChart && poolChart.resize();
+        window.addEventListener('resize', onResize);
+        poolChartRef.value._onResize = onResize;
+      };
+
+      async function runPool() {
+        poolLoading.value = true;
+        btMsg.text = '';
+        try {
+          const qs = new URLSearchParams({ weighted: '1', stop_loss: poolStop.value || 0 });
+          if (poolSince.value.trim()) qs.set('since', poolSince.value.trim());
+          pool.value = await api.get(apiUrl('backtest/pool?' + qs));
+          await nextTick();
+          renderPoolChart();
+        } catch (e) {
+          pool.value = null;
+          btMsg.text = e.message || '全池回测失败';
+          btMsg.type = 'error';
+        }
+        poolLoading.value = false;
+      }
+
+      const dirFwdCols = [
+        { title: '方向', dataIndex: 'key', key: 'key' },
+        { title: '样本', dataIndex: 'n', key: 'n' },
+        { title: '次日均', dataIndex: 'next1_avg_pct', key: 'n1' },
+        { title: '次日胜率', dataIndex: 'next1_win_pct', key: 'nw' },
+        { title: '5日均', dataIndex: 'next5_avg_pct', key: 'n5' },
+      ];
+      const dirFwdRows = computed(() => Object.entries(pool.value?.direction_stats || {}).map(([k, v]) => ({ key: k, ...v })));
+
+      const poolCols = [
+        { title: '代码', dataIndex: 'code', key: 'code', fixed: 'left', width: 90 },
+        { title: '市场', dataIndex: 'market', key: 'market', width: 70 },
+        { title: '预测', dataIndex: 'n_preds', key: 'np', width: 70 },
+        { title: '看涨', dataIndex: 'n_bull', key: 'nb', width: 70 },
+        { title: '策略', dataIndex: 'pred_return_pct', key: 'pr', width: 92 },
+        { title: '买入持有', dataIndex: 'buy_hold_pct', key: 'bh', width: 92 },
+        { title: '超额', dataIndex: 'excess_pct', key: 'ex', width: 92 },
+        { title: '交易', dataIndex: 'n_trades', key: 'nt', width: 70 },
+        { title: '胜率', dataIndex: 'win_rate', key: 'wr', width: 80 },
+      ];
+      const poolRows = computed(() => (pool.value?.per_stock || [])
+        .map(r => ({ ...r, rowKey: r.code + '.' + r.market })));
+
+      // ---------- 策略绩效：单标的 ----------
+      const sf = reactive({ code: '', strategy: 'ma', fast: 5, slow: 20, rsiPeriod: 14, rsiLow: 30, rsiHigh: 70, since: '', stopLoss: 0 });
+      const single = ref(null);
+      const singleLoading = ref(false);
+      const singleChartRef = ref(null);
+      let singleChart = null;
+
+      const renderSingleChart = () => {
+        if (!singleChartRef.value || !single.value?.equity_curve?.length) return;
+        if (singleChart) singleChart.dispose();
+        singleChart = echarts.init(singleChartRef.value);
+        const eq = single.value.equity_curve;
+        singleChart.setOption({
+          animation: false,
+          tooltip: {
+            trigger: 'axis', backgroundColor: 'rgba(255,255,255,0.96)', borderColor: '#e8e8e8',
+            textStyle: { color: 'rgba(0,0,0,.85)', fontSize: 12 },
+            valueFormatter: (v) => Number(v).toLocaleString(),
+          },
+          grid: { left: 84, right: 20, top: 20, bottom: 42 },
+          xAxis: {
+            type: 'category', data: eq.map(x => x[0]),
+            axisLabel: { color: 'rgba(0,0,0,.45)', fontSize: 11 }, splitLine: { show: false },
+          },
+          yAxis: {
+            type: 'value', scale: true,
+            axisLabel: { color: 'rgba(0,0,0,.45)', fontSize: 11 },
+            splitLine: { lineStyle: { color: '#f5f5f5' } },
+          },
+          dataZoom: [
+            { type: 'inside' },
+            { type: 'slider', bottom: 4, height: 16, borderColor: '#e0e0e0' },
+          ],
+          series: [
+            { name: '资金曲线', type: 'line', data: eq.map(x => +x[1].toFixed(2)), showSymbol: false, lineStyle: { width: 2, color: '#cf1322' } },
+          ],
+        });
+        const onResize = () => singleChart && singleChart.resize();
+        window.addEventListener('resize', onResize);
+        singleChartRef.value._onResize = onResize;
+      };
+
+      async function runSingle() {
+        const raw = (sf.code || '').trim().toUpperCase();
+        const dot = raw.indexOf('.');
+        if (dot < 1) { btMsg.text = '标的格式：600519.SH / 00700.HK'; btMsg.type = 'error'; return; }
+        const code = raw.slice(0, dot), market = raw.slice(dot + 1);
+        if (!['SH', 'SZ', 'HK'].includes(market)) { btMsg.text = '市场需为 SH/SZ/HK'; btMsg.type = 'error'; return; }
+        singleLoading.value = true;
+        btMsg.text = '';
+        try {
+          const qs = new URLSearchParams({
+            strategy: sf.strategy, fast: sf.fast, slow: sf.slow,
+            rsi_period: sf.rsiPeriod, rsi_low: sf.rsiLow, rsi_high: sf.rsiHigh,
+            since: sf.since.trim(), stop_loss: sf.stopLoss || 0,
+          });
+          single.value = await api.get(apiUrl('backtest/stock/' + market + '/' + code + '?' + qs));
+          await nextTick();
+          renderSingleChart();
+        } catch (e) {
+          single.value = null;
+          btMsg.text = e.message || '回测失败';
+          btMsg.type = 'error';
+        }
+        singleLoading.value = false;
+      }
+
+      const tradeCols = [
+        { title: '开仓日', dataIndex: 'entry_date', key: 'ed' },
+        { title: '平仓日', dataIndex: 'exit_date', key: 'xd' },
+        { title: '开仓价', dataIndex: 'entry_price', key: 'ep' },
+        { title: '平仓价', dataIndex: 'exit_price', key: 'xp' },
+        { title: '收益', dataIndex: 'ret_pct', key: 'rt' },
+        { title: '原因', dataIndex: 'reason', key: 'rs' },
+      ];
+
       onMounted(async () => {
         try { s.value = await api.get(apiUrl('backtest')); } catch (e) { console.error(e); }
         loading.value = false;
       });
-      return { s, loading, statCols, dirRows, confRows, mktRows, fmtPct };
+
+      onBeforeUnmount(() => {
+        if (poolChart) poolChart.dispose();
+        if (singleChart) singleChart.dispose();
+        if (poolChartRef.value?._onResize) window.removeEventListener('resize', poolChartRef.value._onResize);
+        if (singleChartRef.value?._onResize) window.removeEventListener('resize', singleChartRef.value._onResize);
+      });
+
+      return {
+        s, loading, statCols, dirRows, confRows, mktRows, fmtPct, fmt,
+        btMsg, pool, poolLoading, poolSince, poolStop, poolChartRef, runPool,
+        dirFwdCols, dirFwdRows, poolCols, poolRows,
+        sf, single, singleLoading, singleChartRef, runSingle, tradeCols,
+      };
     },
   };
 
