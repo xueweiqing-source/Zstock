@@ -284,16 +284,19 @@ def _merge_curves(curves: List[Tuple[str, List[Tuple[str, float]]]],
     return merged
 
 
-def _direction_stats(klines_map: Dict[tuple, List[dict]],
+def _direction_stats(closes_map: Dict[tuple, List[tuple]],
                      preds_map: Dict[tuple, List[Dict]]) -> Dict[str, Any]:
-    """按预测方向统计前瞻实际收益：次日（预测目标日）与 5 日均值/胜率"""
+    """按预测方向统计前瞻实际收益：次日（预测目标日）与 5 日均值/胜率
+
+    closes_map: {(code, market): [(date, close), ...]}
+    """
     buckets = {d: {"n1": [], "n5": []} for d in ("看涨", "看跌", "震荡")}
     for key, preds in preds_map.items():
-        klines = klines_map.get(key)
+        klines = closes_map.get(key)
         if not klines:
             continue
-        dates = [k["date"] for k in klines]
-        closes = [k["close"] for k in klines]
+        dates = [k[0] for k in klines]
+        closes = [k[1] for k in klines]
         for p in preds:
             d0 = (p.get("created_at") or p.get("date") or "")[:10]
             direction = p.get("direction") or ""
@@ -302,11 +305,14 @@ def _direction_stats(klines_map: Dict[tuple, List[dict]],
             eff = bisect.bisect_right(dates, d0) - 1   # 预测生效 bar（基准收盘）
             if eff < 0 or eff + 1 >= len(klines):
                 continue
-            r1 = closes[eff + 1] / closes[eff] - 1.0
+            base = closes[eff]
+            if not base or base <= 0:
+                continue
+            r1 = closes[eff + 1] / base - 1.0
             buckets[direction]["n1"].append(r1)
             e5 = min(eff + 5, len(klines) - 1)
             if e5 > eff:
-                buckets[direction]["n5"].append(closes[e5] / closes[eff] - 1.0)
+                buckets[direction]["n5"].append(closes[e5] / base - 1.0)
 
     out: Dict[str, Any] = {}
     for d, b in buckets.items():
@@ -320,30 +326,27 @@ def _direction_stats(klines_map: Dict[tuple, List[dict]],
     return out
 
 
-def weighted_pool_curve(klines_map: Dict[tuple, List[dict]],
+def weighted_pool_curve(closes_map: Dict[tuple, List[tuple]],
                         preds_map: Dict[tuple, List[Dict]],
                         init_cash: float = 1_000_000.0,
                         commission: float = 0.0003,
                         stamp_tax: float = 0.0005) -> Optional[Dict[str, Any]]:
     """置信度加权日频调仓组合（收盘近似口径）。
 
+    closes_map: {(code, market): [(date, close), ...]}
     每日收盘按「最新一条预测（≤ 前一交易日）为看涨」的标的构建持仓，权重 ∝
-    置信度分（confidence_score，缺失时按 高/中/低 = 3/2/1）：
-    - 组合日收益 = Σ w_i(t-1)·r_i(t) − 调仓费用（佣金双边 + 卖出印花，按权重换手计）
-    - r_i(t) 为标的 t 日收盘收益；停牌沿用前值（0 收益），数据开始前不参与
-    - 与单标的引擎"预测次日生效"口径一致；属近似模拟（无逐笔成交），
-      与 sleeve 等权组合（逐笔全仓）互为参照
+    置信度分（confidence_score，缺失时按 高/中/低 = 3/2/1）。
     """
-    master = sorted({d for kl in klines_map.values() for k in kl for d in [k["date"]]})
+    master = sorted({d for kl in closes_map.values() for k in kl for d in [k[0]]})
     if len(master) < 2:
         return None
 
     series: Dict[tuple, List[Optional[float]]] = {}
     events: Dict[tuple, List[tuple]] = {}
-    for key, kl in klines_map.items():
+    for key, kl in closes_map.items():
         if not kl:
             continue
-        closes = {k["date"]: k["close"] for k in kl}
+        closes = {k[0]: k[1] for k in kl}
         arr: List[Optional[float]] = []
         last = None
         for d in master:
@@ -406,8 +409,9 @@ def weighted_pool_curve(klines_map: Dict[tuple, List[dict]],
     return {"stats": _curve_stats(curve, init_cash), "equity_curve": curve}
 
 
-def pred_pool_report(klines_map: Dict[tuple, List[dict]],
+def pred_pool_report(keys: List[tuple],
                      preds_map: Dict[tuple, List[Dict]],
+                     since: str = "",
                      init_cash: float = 1_000_000.0,
                      commission: float = 0.0003,
                      stamp_tax: float = 0.0005,
@@ -417,7 +421,8 @@ def pred_pool_report(klines_map: Dict[tuple, List[dict]],
                      include_weighted: bool = False) -> Dict[str, Any]:
     """全池三层预测跟随批量回测——回答"跟预测操作到底赚不赚钱"。
 
-    klines_map / preds_map: {(code, market): [...]}；min_bars 以下的标的跳过。
+    keys: [(code, market), ...]；K 线由本函数逐只从 DB 读取（流式，防 OOM）。
+    min_bars 以下的标的跳过。
     stop_loss_pct: 逐标的 sleeve 回测的止损百分比（0=关）。
     include_weighted: 附带置信度加权组合（近似口径，见 weighted_pool_curve）。
     - per_stock：逐标的 pred_follow 回测（复用单标的引擎，口径一致）
@@ -425,16 +430,23 @@ def pred_pool_report(klines_map: Dict[tuple, List[dict]],
       基准=等权买入持有（同 universe、同区间）
     - direction_stats：看涨/看跌/震荡 预测后的实际次日/5日收益
     """
+    import db as D
+
     per_stock: List[Dict[str, Any]] = []
     curves: List[Tuple[str, List[Tuple[str, float]]]] = []
     bench_curves: List[Tuple[str, List[Tuple[str, float]]]] = []
     n_preds_total = 0
+    # 只存 date+close（轻量），供加权组合与方向统计用
+    closes_map: Dict[tuple, List[dict]] = {}
 
-    for key in sorted(klines_map.keys()):
+    for key in sorted(keys):
         code, market = key
-        klines = klines_map[key]
         preds = preds_map.get(key) or []
-        if len(klines) < min_bars or not preds:
+        if not preds:
+            continue
+        # 流式：一次只加载一只的 K 线，用完只留 close
+        klines = D.get_klines(code, market, start=since)
+        if len(klines) < min_bars:
             continue
         n_preds_total += len(preds)
         positions = pred_positions(klines, preds)
@@ -455,7 +467,17 @@ def pred_pool_report(klines_map: Dict[tuple, List[dict]],
         # sleeve 曲线按 1 元份额生成，合并后乘 sleeve_cash 即得等权组合
         curves.append((code, r["equity_curve"]))
         c0 = klines[0]["close"]
-        bench_curves.append((code, [(k["date"], k["close"] / c0) for k in klines]))
+        if c0 and c0 > 0:
+            bench_curves.append((code, [(k["date"], k["close"] / c0) for k in klines]))
+        else:
+            bench_curves.append((code, [(k["date"], 1.0) for k in klines]))
+        # 只留 (date, close) tuple，释放完整 K 线（比 dict 省 60% 内存）
+        closes_map[key] = [(k["date"], k["close"]) for k in klines]
+        del klines
+        # 每 50 只强制 GC，防 CPython 内存碎片累积
+        if len(per_stock) % 50 == 0:
+            import gc
+            gc.collect()
 
     if not per_stock:
         return {"per_stock": [], "portfolio": None, "weighted": None, "direction_stats": {},
@@ -475,9 +497,13 @@ def pred_pool_report(klines_map: Dict[tuple, List[dict]],
 
     weighted = None
     if include_weighted:
-        weighted = weighted_pool_curve(klines_map, preds_map, init_cash=init_cash,
+        import gc
+        gc.collect()
+        weighted = weighted_pool_curve(closes_map, preds_map, init_cash=init_cash,
                                        commission=commission, stamp_tax=stamp_tax)
 
+    import gc
+    gc.collect()
     return {
         "per_stock": per_stock,
         "portfolio": {
@@ -486,7 +512,7 @@ def pred_pool_report(klines_map: Dict[tuple, List[dict]],
             "bench_curve": bench_curve,
         },
         "weighted": weighted,
-        "direction_stats": _direction_stats(klines_map, preds_map),
+        "direction_stats": _direction_stats(closes_map, preds_map),
         "meta": {
             "n_stocks": n, "n_preds": n_preds_total,
             "init_cash": init_cash, "commission": commission,
@@ -498,10 +524,11 @@ def pred_pool_report(klines_map: Dict[tuple, List[dict]],
 
 
 def load_pool_from_db(since: str = "") -> tuple:
-    """从 DB 加载全池预测与对应 K 线：返回 (klines_map, preds_map)。
+    """从 DB 加载全池预测：返回 (keys, preds_map)。
 
-    since 过滤预测（created_at >= since）与 K 线起点。predictions 表只存置信度
-    标签（高/中/低），加权时按标签映射 3/2/1。
+    keys = [(code, market), ...]；K 线不在此预加载，由调用方逐只读取（流式），
+    避免 966 只 × 1920 根一次性进内存导致 OOM。
+    since 过滤预测（created_at >= since）。predictions 表置信度标签（高/中/低）映射 3/2/1。
     """
     import db as D
     D.init_db()
@@ -513,8 +540,8 @@ def load_pool_from_db(since: str = "") -> tuple:
     preds_map: Dict[tuple, list] = {}
     for r in rows:
         preds_map.setdefault((r["code"], r["market"]), []).append(r)
-    klines_map = {key: D.get_klines(key[0], key[1], start=since) for key in preds_map}
-    return klines_map, preds_map
+    keys = sorted(preds_map.keys())
+    return keys, preds_map
 
 
 # ============================================================
@@ -630,11 +657,12 @@ def main() -> int:
 
     # ---------- 全池模式 ----------
     if args.pool:
-        klines_map, preds_map = load_pool_from_db(args.since)
+        keys, preds_map = load_pool_from_db(args.since)
         if not preds_map:
             print("无可回测标的：predictions 表无记录，先跑几期 pipeline。")
             return 1
-        rep = pred_pool_report(klines_map, preds_map, init_cash=args.init_cash,
+        rep = pred_pool_report(keys, preds_map, since=args.since,
+                               init_cash=args.init_cash,
                                commission=args.commission, stamp_tax=args.stamp_tax,
                                slippage_bps=args.slippage_bps,
                                stop_loss_pct=args.stop_loss,

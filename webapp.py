@@ -357,11 +357,11 @@ def api_backtest_pool():
     hit = _pool_cache.get(cache_key)
     if hit and now - hit[0] < 60:
         return jsonify(hit[1])
-    klines_map, preds_map = B.load_pool_from_db(since)
+    keys, preds_map = B.load_pool_from_db(since)
     if not preds_map:
         return jsonify({"error": "no_predictions",
                         "message": "predictions 表暂无记录，先跑几期 pipeline"}), 404
-    rep = B.pred_pool_report(klines_map, preds_map, stop_loss_pct=stop_loss,
+    rep = B.pred_pool_report(keys, preds_map, since=since, stop_loss_pct=stop_loss,
                              include_weighted=weighted)
     if not rep["meta"]["n_stocks"]:
         return jsonify({"error": "no_data",
