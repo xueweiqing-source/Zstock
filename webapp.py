@@ -349,13 +349,14 @@ _pool_cache: dict = {}      # {since: (ts, report)} 全池回测结果 60s 缓�
 @login_required
 def api_backtest_pool():
     """全池预测跟随批量回测：等权组合 + 分方向前瞻 + 分标的（60s 内存缓存）"""
-    since = (request.args.get("since") or "").strip()
+    # 默认 2023-01-01 起，防止全量回测 OOM（2G 机器扛不住 2020 至今全部数据）
+    since = (request.args.get("since") or "").strip() or "2023-01-01"
     stop_loss = min(max(request.args.get("stop_loss", 0.0, type=float), 0.0), 50.0)
     weighted = request.args.get("weighted", "1") in ("1", "true", "yes")
     cache_key = f"{since}|{stop_loss}|{int(weighted)}"
     now = time.time()
     hit = _pool_cache.get(cache_key)
-    if hit and now - hit[0] < 60:
+    if hit and now - hit[0] < 300:  # 5 分钟缓存，防止重复回测 OOM
         return jsonify(hit[1])
     keys, preds_map = B.load_pool_from_db(since)
     if not preds_map:

@@ -528,8 +528,9 @@ def load_pool_from_db(since: str = "") -> tuple:
 
     keys = [(code, market), ...]；K 线不在此预加载，由调用方逐只读取（流式），
     避免 966 只 × 1920 根一次性进内存导致 OOM。
-    since 过滤预测（created_at >= since）。predictions 表置信度标签（高/中/低）映射 3/2/1。
+    since 过滤预测（created_at >= since），默认 2023-01-01 防全量 OOM。
     """
+    since = since or "2023-01-01"
     import db as D
     D.init_db()
     with D.get_conn() as conn:

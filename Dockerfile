@@ -24,4 +24,5 @@ RUN mkdir -p /app/data/reports
 # 默认起 Web；pipeline 由外层 cron 通过 docker compose exec 触发
 EXPOSE 8501
 CMD ["gunicorn", "-b", "0.0.0.0:8501", "-w", "1", "--threads", "4", \
-     "--timeout", "60", "--access-logfile", "-", "--error-logfile", "-", "webapp:app"]
+     "--timeout", "180", "--max-requests", "10", "--max-requests-jitter", "3", \
+     "--access-logfile", "-", "--error-logfile", "-", "webapp:app"]

@@ -1044,7 +1044,8 @@ const apiUrl = (p) => API_BASE + p.replace(/^\//, '');
         btMsg.text = '';
         try {
           const qs = new URLSearchParams({ weighted: '1', stop_loss: poolStop.value || 0 });
-          if (poolSince.value.trim()) qs.set('since', poolSince.value.trim());
+          // 默认起始日 2023-01-01，防止全量回测 OOM（2G 机器扛不住 2020 至今全部数据）
+          qs.set('since', poolSince.value.trim() || '2023-01-01');
           pool.value = await api.get(apiUrl('backtest/pool?' + qs));
           await nextTick();
           renderPoolChart();
